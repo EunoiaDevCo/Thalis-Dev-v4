@@ -886,6 +886,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		}
 
 		m_ProgramCounter = callFrame.returnPC;
+		m_FramePool.Release(frame);
 	} break;
 	case OpCode::MEMBER_FUNCTION_CALL: {
 		uint16 classID = ReadUInt16();
