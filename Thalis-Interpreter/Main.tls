@@ -1,0 +1,45 @@
+Import IO;
+
+class Vec2
+{
+	public void Set(real32 x, real32 y)
+	{
+		this->x = x;
+		this->y = y;
+	}
+
+	public void Print()
+	{
+		IO.Print("(");
+		IO.Print(x);
+		IO.Print(", ");
+		IO.Print(y);
+		IO.Println(")");
+	}
+
+	public real32 x;
+	public real32 y;
+};
+
+class Transform
+{
+	public Vec2& GetPos() { return pos; }
+
+	public Vec2 pos;
+};
+
+class Main
+{
+	public static void Main()
+	{
+		Vec2 v1;
+		v1.Set(10.0, 10.0);
+
+		Transform t;
+
+		Transform* p = &t;
+
+		p->pos = v1;
+		p->GetPos().Print();
+	}
+};
