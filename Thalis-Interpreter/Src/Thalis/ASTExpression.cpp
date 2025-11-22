@@ -440,18 +440,20 @@ TypeInfo ASTExpressionReturn::GetTypeInfo(Program* program)
 void ASTExpressionStaticVariable::EmitCode(Program* program)
 {
 	if (isStatement) return;
-	program->AddPushStaticVariableCommand(classID, offset, typeInfo.type, typeInfo.pointerLevel, false);
+	program->AddPushStaticVariableCommand(classID, offset, typeInfo.type, typeInfo.pointerLevel, false, isArray);
 }
 
 TypeInfo ASTExpressionStaticVariable::GetTypeInfo(Program* program)
 {
+	if (offset == UINT64_MAX)
+		offset = program->GetClass(classID)->CalculateStaticOffset(program, members, &typeInfo, &isArray);
 	return typeInfo;
 }
 
 bool ASTExpressionStaticVariable::Resolve(Program* program)
 {
 	if(offset == UINT64_MAX)
-		offset = program->GetClass(classID)->CalculateStaticOffset(program, members, &typeInfo);
+		offset = program->GetClass(classID)->CalculateStaticOffset(program, members, &typeInfo, &isArray);
 	return offset != UINT64_MAX;
 }
 
@@ -503,7 +505,7 @@ void ASTExpressionPushMember::EmitCode(Program* program)
 
 	expr->EmitCode(program);
 
-	program->AddPushMemberCommand(typeInfo.type, typeInfo.pointerLevel, offset, false);
+	program->AddPushMemberCommand(typeInfo.type, typeInfo.pointerLevel, offset, false, isArray);
 }
 
 TypeInfo ASTExpressionPushMember::GetTypeInfo(Program* program)
@@ -511,7 +513,7 @@ TypeInfo ASTExpressionPushMember::GetTypeInfo(Program* program)
 	if (!members.empty())
 	{
 		TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
-		offset = program->GetClass(exprTypeInfo.type)->CalculateMemberOffset(program, members, &typeInfo);
+		offset = program->GetClass(exprTypeInfo.type)->CalculateMemberOffset(program, members, &typeInfo, &isArray);
 	}
 	return typeInfo;
 }
@@ -521,7 +523,7 @@ bool ASTExpressionPushMember::Resolve(Program* program)
 	if(!members.empty())
 	{
 		TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
-		offset = program->GetClass(exprTypeInfo.type)->CalculateMemberOffset(program, members, &typeInfo);
+		offset = program->GetClass(exprTypeInfo.type)->CalculateMemberOffset(program, members, &typeInfo, &isArray);
 	}
 	return offset != UINT64_MAX;
 }
@@ -581,4 +583,24 @@ void ASTExpressionDeclareReference::EmitCode(Program* program)
 TypeInfo ASTExpressionDeclareReference::GetTypeInfo(Program* program)
 {
 	return TypeInfo(type, pointerLevel);
+}
+
+void ASTExpressionConstructorCall::EmitCode(Program* program)
+{
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		argExprs[i]->EmitCode(program);
+
+	program->AddConstructorCallCommand(type, functionID);
+}
+
+TypeInfo ASTExpressionConstructorCall::GetTypeInfo(Program* program)
+{
+	return TypeInfo(type, 0);
+}
+
+bool ASTExpressionConstructorCall::Resolve(Program* program)
+{
+	Class* cls = program->GetClass(type);
+	functionID = cls->GetFunctionID(cls->GetName(), argExprs);
+	return functionID != INVALID_ID;
 }

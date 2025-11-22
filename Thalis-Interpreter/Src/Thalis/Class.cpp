@@ -20,6 +20,11 @@ void Class::AddFunction(Function* function)
 		m_FunctionMap.push_back(function);
 		function->id = functionID;
 	}
+
+	if (function->name.find('~') != std::string::npos)
+	{
+		m_Destructor = function;
+	}
 }
 
 Function* Class::GetFunction(uint16 id)
@@ -209,14 +214,14 @@ void Class::InitStaticData(Program* program)
 		const ClassField& field = m_StaticFields[i];
 		if (field.initializeExpr)
 		{
-			ASTExpressionStaticVariable* variableExpr = new ASTExpressionStaticVariable(m_ID, field.offset, field.type);
+			ASTExpressionStaticVariable* variableExpr = new ASTExpressionStaticVariable(m_ID, field.offset, field.type, field.dimensions > 0);
 			ASTExpressionSet* setExpr = new ASTExpressionSet(variableExpr, field.initializeExpr);
 			setExpr->EmitCode(program);
 		}
 	}
 }
 
-uint64 Class::CalculateMemberOffset(Program* program, const std::vector<std::string>& members, TypeInfo* typeInfo, uint32 currentMember, uint32 currentOffset)
+uint64 Class::CalculateMemberOffset(Program* program, const std::vector<std::string>& members, TypeInfo* typeInfo, bool* isArray, uint32 currentMember, uint32 currentOffset)
 {
 	for (uint32 i = currentMember; i < members.size(); i++)
 	{
@@ -232,6 +237,7 @@ uint64 Class::CalculateMemberOffset(Program* program, const std::vector<std::str
 				if (Value::IsPrimitiveType(member.type.type) || (i + 1) == members.size())
 				{
 					*typeInfo = member.type;
+					*isArray = member.numDimensions > 0;
 					
 					return memberOffset;
 				}
@@ -241,7 +247,7 @@ uint64 Class::CalculateMemberOffset(Program* program, const std::vector<std::str
 				if (!subClass)
 					throw std::runtime_error("Invalid class type for member: " + member.name);
 
-				return subClass->CalculateMemberOffset(program, members, typeInfo, i + 1, memberOffset);
+				return subClass->CalculateMemberOffset(program, members, typeInfo, isArray, i + 1, memberOffset);
 			}
 		}
 	}
@@ -250,7 +256,7 @@ uint64 Class::CalculateMemberOffset(Program* program, const std::vector<std::str
 	return UINT64_MAX;
 }
 
-uint64 Class::CalculateStaticOffset(Program* program, const std::vector<std::string>& members, TypeInfo* typeInfo)
+uint64 Class::CalculateStaticOffset(Program* program, const std::vector<std::string>& members, TypeInfo* typeInfo, bool* isArray)
 {
 	if (members.size() == 1)
 	{
@@ -270,6 +276,8 @@ uint64 Class::CalculateStaticOffset(Program* program, const std::vector<std::str
 	{
 		uint64 baseOffset = UINT64_MAX;
 		uint16 type = INVALID_ID;
+		uint8 pointerLevel = 0;
+		bool isArray_ = false;
 		for (uint32 i = 0; i < m_StaticFields.size(); i++)
 		{
 			const ClassField& field = m_StaticFields[i];
@@ -277,13 +285,23 @@ uint64 Class::CalculateStaticOffset(Program* program, const std::vector<std::str
 			{
 				baseOffset = field.offset;
 				type = field.type.type;
+				pointerLevel = field.type.pointerLevel;
+				isArray_ = field.numDimensions > 0;
 				break;
 			}
 		}
 
 		if (type == INVALID_ID) return UINT64_MAX;
 
-		return baseOffset + program->GetClass(type)->CalculateMemberOffset(program, members, typeInfo, 1);
+		if (Value::IsPrimitiveType(type))
+		{
+			typeInfo->type = type;
+			typeInfo->pointerLevel = pointerLevel;
+			*isArray = isArray_;
+			return baseOffset;
+		}
+
+		return baseOffset + program->GetClass(type)->CalculateMemberOffset(program, members, typeInfo, isArray, 1);
 	}
 
 	return UINT64_MAX;

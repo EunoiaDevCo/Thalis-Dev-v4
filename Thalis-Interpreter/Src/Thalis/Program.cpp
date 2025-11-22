@@ -146,7 +146,7 @@ void Program::AddPushIndexedCommand(uint64 typeSize, uint8 numIndices)
 	WriteUInt8(numIndices);
 }
 
-void Program::AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16 type, uint8 pointerLevel, bool isReference)
+void Program::AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16 type, uint8 pointerLevel, bool isReference, bool isArray)
 {
 	WriteOPCode(OpCode::PUSH_STATIC_VARIABLE);
 	WriteUInt16(classID);
@@ -154,15 +154,17 @@ void Program::AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16
 	WriteUInt16(type);
 	WriteUInt8(pointerLevel);
 	WriteUInt8(isReference);
+	WriteUInt8(isArray);
 }
 
-void Program::AddPushMemberCommand(uint16 type, uint8 pointerLevel, uint64 offset, bool isReference)
+void Program::AddPushMemberCommand(uint16 type, uint8 pointerLevel, uint64 offset, bool isReference, bool isArray)
 {
 	WriteOPCode(OpCode::PUSH_MEMBER);
 	WriteUInt16(type);
 	WriteUInt8(pointerLevel);
 	WriteUInt64(offset);
 	WriteUInt8(isReference);
+	WriteUInt8(isArray);
 }
 
 uint32 Program::AddPushLoopCommand()
@@ -277,6 +279,13 @@ void Program::AddMemberFunctionCallCommand(uint16 classID, uint16 functionID, bo
 	WriteUInt16(classID);
 	WriteUInt16(functionID);
 	WriteUInt8(usesReturnValue);
+}
+
+void Program::AddConstructorCallCommand(uint16 type, uint16 functionID)
+{
+	WriteOPCode(OpCode::CONSTRUCTOR_CALL);
+	WriteUInt16(type);
+	WriteUInt16(functionID);
 }
 
 void Program::AddUnaryUpdateCommand(uint8 op, bool pushToStack)
@@ -612,11 +621,12 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint16 type = ReadUInt16();
 		uint8 pointerLevel = ReadUInt8();
 		bool isReference = ReadUInt8();
+		bool isArray = ReadUInt8();
 
 		Value value;
 		value.type = type;
 		value.pointerLevel = pointerLevel;
-		value.isArray = false;
+		value.isArray = isArray;
 		value.data = GetClass(classID)->GetStaticData(offset);
 		value.isReference = isReference;
 
@@ -629,9 +639,9 @@ void Program::ExecuteOpCode(OpCode opcode)
 		Value member;
 		member.type = ReadUInt16();
 		member.pointerLevel = ReadUInt8();
-		member.isArray = false;
 		uint64 offset = ReadUInt64();
 		member.isReference = ReadUInt8();
+		member.isArray = ReadUInt8();
 		member.data = (uint8*)base.data + offset;
 
 		m_Stack.push_back(member);
@@ -760,6 +770,32 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		Value object = Value::MakeObject(this, type, m_StackAllocator);
 		m_FrameStack.back()->DeclareLocal(slot, object);
+		m_ScopeStack[m_CurrentScope].objects.push_back(object);
+
+		if (functionID != INVALID_ID)
+		{
+			Function* function = GetClass(type)->GetFunction(functionID);
+
+			CallFrame callFrame;
+			callFrame.basePointer = m_Stack.size();
+			callFrame.popThisStack = true;
+			callFrame.returnPC = m_ProgramCounter;
+			callFrame.usesReturnValue = false;
+			callFrame.loopCount = m_LoopStack.size();
+
+			m_CurrentScope++;
+			m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+			callFrame.scopeCount = m_CurrentScope;
+
+			Frame* frame = m_FramePool.Acquire(function->numLocals);
+			AddFunctionArgsToFrame(frame, function);
+
+			m_CallStack.push_back(callFrame);
+			m_FrameStack.push_back(frame);
+			m_ThisStack.push_back(Value::MakePointer(type, 1, object.data, m_StackAllocator));
+
+			m_ProgramCounter = function->pc;
+		}
 	} break;
 	case OpCode::DECLARE_OBJECT_WITH_ASSIGN: {
 		uint16 type = ReadUInt16();
@@ -772,6 +808,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint64 size = GetClass(type)->GetSize();
 		object.Assign(assignValue, size);
 		m_FrameStack.back()->DeclareLocal(slot, object);
+		m_ScopeStack[m_CurrentScope].objects.push_back(object);
 	} break;
 	case OpCode::DECLARE_REFERENCE: {
 		uint16 slot = ReadUInt16();
@@ -823,6 +860,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
 
 		Frame* frame = m_FramePool.Acquire(function->numLocals);
 		AddFunctionArgsToFrame(frame, function);
@@ -835,17 +873,27 @@ void Program::ExecuteOpCode(OpCode opcode)
 	case OpCode::RETURN: {
 		uint8 returnInfo = ReadUInt8();
 		Frame* frame = m_FrameStack.back(); m_FrameStack.pop_back();
-		CallFrame& callFrame = m_CallStack.back(); m_CallStack.pop_back();
+		CallFrame callFrame = m_CallStack.back(); m_CallStack.pop_back();
 		
-		for (int32 i = m_LoopStack.size() - 1; i >= (int32)callFrame.loopCount; i--)
-		{
-			const LoopFrame& loop = m_LoopStack[i];
-			ScopeInfo& scope = m_ScopeStack[m_CurrentScope--];
-			for (uint32 j = 0; j < scope.objects.size(); j++) //TODO: Call destructors
-			{
+		if (callFrame.popThisStack)
+			m_ThisStack.pop_back();
 
+		uint32 dcount = m_PendingDestructors.size();
+
+		uint64 freeMarker = m_ScopeStack[callFrame.scopeCount].marker;
+		for (int32 i = m_CurrentScope; i >= (int32)callFrame.scopeCount; i--)
+		{
+			ScopeInfo& scope = m_ScopeStack[i];
+			for (uint32 j = 0; j < scope.objects.size(); j++)
+			{
+				AddDestructorRecursive(scope.objects[j]);
 			}
+			scope.objects.clear();
 		}
+		m_CurrentScope = callFrame.scopeCount - 1;
+		ExecutePendingDestructors(dcount);
+
+		m_LoopStack.resize(callFrame.loopCount);
 
 		Value returnValue = Value::MakeNULL();
 		uint64 returnMarker = m_ReturnAllocator->GetMarker();
@@ -864,12 +912,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 			m_Stack.pop_back();
 		}
 
-		m_LoopStack.resize(callFrame.loopCount);
-
-		ScopeInfo& scope = m_ScopeStack[m_CurrentScope--];
-
-		//TODO: Call destructors
-		m_StackAllocator->FreeToMarker(scope.marker);
+		m_StackAllocator->FreeToMarker(freeMarker);
 
 		if (returnValue.type != INVALID_ID)
 		{
@@ -905,11 +948,12 @@ void Program::ExecuteOpCode(OpCode opcode)
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
 
-		Frame* frame = m_FramePool.Acquire(function->numLocals);
-		AddFunctionArgsToFrame(frame, function);
-
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
+
+		Frame* frame = m_FramePool.Acquire(function->numLocals);
+		AddFunctionArgsToFrame(frame, function);
 
 		m_ThisStack.push_back(Value::MakePointer(classID, 1, objToCallFunctionOn.data, m_StackAllocator));
 
@@ -917,6 +961,39 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_FrameStack.push_back(frame);
 
 		m_ProgramCounter = function->pc;
+	} break;
+	case OpCode::CONSTRUCTOR_CALL: {
+		uint16 type = ReadUInt16();
+		uint16 functionID = ReadUInt16();
+
+		Value object = Value::MakeObject(this, type, m_StackAllocator);
+		m_ScopeStack[m_CurrentScope].objects.push_back(object);
+
+		Class* cls = GetClass(type);
+		Function* function = cls->GetFunction(functionID);
+
+		CallFrame callFrame;
+		callFrame.basePointer = m_Stack.size();
+		callFrame.popThisStack = true;
+		callFrame.returnPC = m_ProgramCounter;
+		callFrame.usesReturnValue = false;
+		callFrame.loopCount = m_LoopStack.size();
+
+		m_CurrentScope++;
+		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
+
+		Frame* frame = m_FramePool.Acquire(function->numLocals);
+		AddFunctionArgsToFrame(frame, function);
+
+		m_ThisStack.push_back(Value::MakePointer(type, 1, object.data, m_StackAllocator));
+
+		m_CallStack.push_back(callFrame);
+		m_FrameStack.push_back(frame);
+
+		m_ProgramCounter = function->pc;
+
+		m_Stack.push_back(object);
 	} break;
 	case OpCode::ADDRESS_OF: {
 		Value value = m_Stack.back();
@@ -1014,7 +1091,14 @@ void Program::ExecuteOpCode(OpCode opcode)
 	} break;
 	case OpCode::POP_SCOPE: {
 		ScopeInfo* scope = &m_ScopeStack[m_CurrentScope];
-		//TOOD: Call destructors
+		uint32 dcount = m_PendingDestructors.size();
+		for (uint32 i = 0; i < scope->objects.size(); i++)
+		{
+			AddDestructorRecursive(scope->objects[i]);
+		}
+		ExecutePendingDestructors(dcount);
+		scope->objects.clear();
+
 		m_StackAllocator->FreeToMarker(scope->marker);
 		m_CurrentScope--;
 	} break;
@@ -1139,6 +1223,98 @@ void Program::AddFunctionArgsToFrame(Frame* frame, Function* function)
 
 		frame->DeclareLocal(param.variableID, arg);
 	}
+}
+
+void Program::AddDestructorRecursive(const Value& value)
+{
+	if (value.IsPrimitive() || value.IsPointer())
+		return;
+
+	Class* cls = GetClass(value.type);
+	if (!cls)
+		return;
+
+	const std::vector<ClassField>& members = cls->GetMemberFields();
+	for (int32 i = (int32)members.size() - 1; i >= 0; i--)
+	{
+		const ClassField& field = members[i];
+
+		if (Value::IsPrimitiveType(field.type.type) || field.type.pointerLevel > 0)
+			continue;
+
+		if (field.numDimensions > 0)
+		{
+			uint64 typeSize = GetTypeSize(field.type.type);
+			uint32 numElements = 1;
+			for (uint32 j = 0; j < field.numDimensions; j++)
+				numElements *= field.dimensions[j];
+
+			uint8* data = (uint8*)value.data + field.offset;
+			for (uint32 j = 0; j < numElements; j++)
+			{
+				Value element;
+				element.type = field.type.type;
+				element.pointerLevel = 0;
+				element.data = data + j * typeSize;
+
+				AddDestructorRecursive(element);
+			}
+		}
+		else
+		{
+			Value member;
+			member.type = field.type.type;
+			member.pointerLevel = 0;
+			member.data = (uint8*)value.data + field.offset;
+
+			AddDestructorRecursive(member);
+		}
+	}
+
+	m_PendingDestructors.push_back(value);
+}
+
+void Program::ExecutePendingDestructors(uint32 offset)
+{
+	if (offset == m_PendingDestructors.size()) return;
+
+	for (uint32 i = offset; i < m_PendingDestructors.size(); i++)
+	{
+		const Value& object = m_PendingDestructors[i];
+		Function* destructor = GetClass(object.type)->GetDestructor();
+		if (!destructor)
+			continue;
+
+		CallFrame callFrame;
+		callFrame.basePointer = m_Stack.size();
+		callFrame.popThisStack = true;
+		callFrame.returnPC = m_ProgramCounter;
+		callFrame.usesReturnValue = false;
+		callFrame.loopCount = m_LoopStack.size();
+
+		m_CurrentScope++;
+		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
+
+		Frame* frame = m_FramePool.Acquire(destructor->numLocals);
+		AddFunctionArgsToFrame(frame, destructor);
+
+		m_ThisStack.push_back(Value::MakePointer(object.type, 1, object.data, m_StackAllocator));
+
+		m_CallStack.push_back(callFrame);
+		m_FrameStack.push_back(frame);
+
+		m_ProgramCounter = destructor->pc;
+
+		while (m_ProgramCounter != callFrame.returnPC)
+		{
+			OpCode innerOpCode = ReadOPCode();
+			if (innerOpCode == OpCode::END) break;
+			ExecuteOpCode(innerOpCode);
+		}
+	}
+
+	m_PendingDestructors.resize(offset);
 }
 
 void Program::CleanUpForExecution()

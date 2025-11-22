@@ -808,32 +808,32 @@ struct Value
 	inline void Assign(const Value& value, uint64 typeSize)
 	{
 		void* target = isReference ? *(void**)data : data;
-		const void* source = value.isReference ? *(void**)value.data : value.data;
+		Value source = value.Actual();
 
 		if (!isReference && IsPointer() && value.IsPointer())
 		{
 			if (pointerLevel != value.pointerLevel || type != value.type) return;
-			memcpy(target, source, sizeof(void*));
+			memcpy(target, source.data, sizeof(void*));
 			return;
 		}
 
 		switch ((ValueType)type)
 		{
-		case ValueType::UINT8:   *(uint8*)target = *(uint8*)source; break;
-		case ValueType::UINT16:  *(uint16*)target = *(uint16*)source; break;
-		case ValueType::UINT32:  *(uint32*)target = *(uint32*)source; break;
-		case ValueType::UINT64:  *(uint64*)target = *(uint64*)source; break;
-		case ValueType::INT8:    *(int8*)target = *(int8*)source; break;
-		case ValueType::INT16:   *(int16*)target = *(int16*)source; break;
-		case ValueType::INT32:   *(int32*)target = *(int32*)source; break;
-		case ValueType::INT64:   *(int64*)target = *(int64*)source; break;
-		case ValueType::REAL32:  *(real32*)target = *(real32*)source; break;
-		case ValueType::REAL64:  *(real64*)target = *(real64*)source; break;
-		case ValueType::BOOL:    *(bool*)target = *(bool*)source; break;
-		case ValueType::CHAR:    *(char*)target = *(char*)source; break;
+		case ValueType::UINT8:   *(uint8*)target = source.GetUInt8(); break;
+		case ValueType::UINT16:  *(uint16*)target = source.GetUInt16(); break;
+		case ValueType::UINT32:  *(uint32*)target = source.GetUInt32(); break;
+		case ValueType::UINT64:  *(uint64*)target = source.GetUInt64(); break;
+		case ValueType::INT8:    *(int8*)target = source.GetInt8(); break;
+		case ValueType::INT16:   *(int16*)target = source.GetInt16(); break;
+		case ValueType::INT32:   *(int32*)target = source.GetInt32(); break;
+		case ValueType::INT64:   *(int64*)target = source.GetInt64(); break;
+		case ValueType::REAL32:  *(real32*)target = source.GetReal32(); break;
+		case ValueType::REAL64:  *(real64*)target = source.GetReal64(); break;
+		case ValueType::BOOL:    *(bool*)target = source.GetBool(); break;
+		case ValueType::CHAR:    *(char*)target = source.GetChar(); break;
 		default:
 			if (type != value.type) return;
-			memcpy(target, source, typeSize);
+			memcpy(target, source.data, typeSize);
 			break;
 		}
 	}

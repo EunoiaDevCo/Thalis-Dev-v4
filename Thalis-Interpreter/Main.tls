@@ -2,6 +2,17 @@ Import IO;
 
 class Vec2
 {
+	public Vec2(real32 x, real32 y)
+	{
+		this->x = x;
+		this->y = y;
+	}
+
+	public ~Vec2()
+	{
+		IO.Println("Called ~Vec2()");
+	}
+
 	public void Set(real32 x, real32 y)
 	{
 		this->x = x;
@@ -23,23 +34,23 @@ class Vec2
 
 class Transform
 {
+	public ~Transform()
+	{
+		IO.Println("~Transform");
+	}
+
 	public Vec2& GetPos() { return pos; }
 
-	public Vec2 pos;
+	public Vec2 pos[100];
 };
 
 class Main
 {
 	public static void Main()
 	{
-		Vec2 v1;
-		v1.Set(10.0, 10.0);
-
 		Transform t;
 
-		Transform* p = &t;
-
-		p->pos = v1;
-		p->GetPos().Print();
+		t.pos[10].Set(10.0, 10.0);
+		t.pos[10].Print();
 	}
 };

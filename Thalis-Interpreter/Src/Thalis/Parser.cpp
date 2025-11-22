@@ -423,7 +423,6 @@ bool Parser::ParseClassVariable(Tokenizer* tokenizer, Class* cls, uint64* member
 	Token openBracket = tokenizer->PeekToken();
 	if (openBracket.type == TokenTypeT::OPEN_BRACKET)
 	{
-		tokenizer->Expect(TokenTypeT::OPEN_BRACKET);
 		ParseArrayDimensions(tokenizer, arrayDimensions);
 		for (uint32 i = 0; i < arrayDimensions.size(); i++)
 			typeSize *= arrayDimensions[i];
@@ -1319,7 +1318,8 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 			Class* constructorClass = m_Program->GetClassByName(functionName);
 			if (constructorClass)
 			{
-				//Constructor call
+				ASTExpressionConstructorCall* constructorCallExpr = new ASTExpressionConstructorCall(m_Program->GetClassID(functionName), argExprs);
+				return constructorCallExpr;
 			}
 
 			ASTExpressionStaticFunctionCall* functionCallExpr = new ASTExpressionStaticFunctionCall(classID, functionName, argExprs);
@@ -1357,7 +1357,8 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 
 				Class* thisClass = m_Program->GetClass(thisClassID);
 				TypeInfo typeInfo;
-				uint64 offset = thisClass->CalculateStaticOffset(m_Program, members, &typeInfo);
+				bool isArray = false;
+				uint64 offset = thisClass->CalculateStaticOffset(m_Program, members, &typeInfo, &isArray);
 				
 				if (offset == UINT64_MAX)
 				{
@@ -1368,7 +1369,7 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 					return setExpr;
 				}
 
-				ASTExpressionStaticVariable* staticVariableExpr = new ASTExpressionStaticVariable(thisClassID, offset, typeInfo);
+				ASTExpressionStaticVariable* staticVariableExpr = new ASTExpressionStaticVariable(thisClassID, offset, typeInfo, isArray);
 				ASTExpressionSet* setExpr = new ASTExpressionSet(staticVariableExpr, assignExpr);
 				return setExpr;
 				
@@ -1430,7 +1431,8 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 				uint16 thisClassID = m_Program->GetClassID(m_CurrentClassName);
 				Class* cls = m_Program->GetClass(thisClassID);
 				TypeInfo staticTypeInfo;
-				uint64 staticOffset = cls->CalculateStaticOffset(m_Program, members, &staticTypeInfo);
+				bool isArray = false;
+				uint64 staticOffset = cls->CalculateStaticOffset(m_Program, members, &staticTypeInfo, &isArray);
 				if (staticOffset == UINT64_MAX)
 				{
 					ASTExpressionThis* thisExpr = new ASTExpressionThis(thisClassID);
@@ -1440,7 +1442,7 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 				}
 				else
 				{
-					ASTExpressionStaticVariable* staticVariableExpr = new ASTExpressionStaticVariable(thisClassID, staticOffset, staticTypeInfo);
+					ASTExpressionStaticVariable* staticVariableExpr = new ASTExpressionStaticVariable(thisClassID, staticOffset, staticTypeInfo, isArray);
 					return staticVariableExpr;
 				}
 			}
@@ -1542,6 +1544,7 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 	std::vector<ASTExpression*> arrayIndices;
 	if (peek.type == TokenTypeT::OPEN_BRACKET)
 	{
+		tokenizer->Expect(TokenTypeT::OPEN_BRACKET);
 		ParseArrayIndices(tokenizer, arrayIndices);
 	}
 
@@ -1600,16 +1603,20 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 				std::vector<std::string> updatedMembers;
 				for (uint32 j = i + 1; j < members.size(); j++)
 				{
+					updatedMembers.push_back(members[j].first);
+					i++;
+
 					if (members[i].second)
 					{
 						break;
 					}
-
-					updatedMembers.push_back(members[j].first);
-					i++;
 				}
 
 				chainExpr = new ASTExpressionStaticVariable(classID, updatedMembers);
+				if (!arrayIndices.empty())
+				{
+					chainExpr = new ASTExpressionPushIndex(chainExpr, arrayIndices);
+				}
 				tokenizer->SetPeek(peek);
 			}
 
@@ -1661,6 +1668,11 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 			chainExpr = objExpr;
 	}
 
+	if (!arrayIndices.empty())
+	{
+		chainExpr = new ASTExpressionPushIndex(chainExpr, arrayIndices);
+	}
+
 	peek = tokenizer->PeekToken();
 	if (peek.type == TokenTypeT::EQUALS)
 	{
@@ -1685,7 +1697,36 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 			ParseMembers(tokenizer, subMembers, &subFunctionCall);
 			chainExpr = ParseExpressionChain(tokenizer, chainExpr, subMembers, subFunctionCall);
 		}
+		else if (peek.type == TokenTypeT::OPEN_BRACKET)
+		{
+			tokenizer->Expect(TokenTypeT::OPEN_BRACKET);
+			std::vector<ASTExpression*> subIndexExprs;
+			ParseArrayIndices(tokenizer, subIndexExprs);
+			chainExpr = new ASTExpressionPushIndex(chainExpr, subIndexExprs);
 
+			peek = tokenizer->PeekToken();
+			if (peek.type == TokenTypeT::DOT || peek.type == TokenTypeT::ARROW)
+			{
+				std::vector<std::pair<std::string, bool>> subMembers;
+				bool subFunctionCall = false;
+				ParseMembers(tokenizer, subMembers, &subFunctionCall);
+				chainExpr = ParseExpressionChain(tokenizer, chainExpr, subMembers, subFunctionCall);
+			}
+		}
+	}
+	else if (peek.type == TokenTypeT::DOT)
+	{
+		std::vector<std::pair<std::string, bool>> subMembers;
+		bool subFunctionCall = false;
+		ParseMembers(tokenizer, subMembers, &subFunctionCall);
+		chainExpr = ParseExpressionChain(tokenizer, chainExpr, subMembers, subFunctionCall);
+	}
+	else if (peek.type == TokenTypeT::ARROW)
+	{
+		std::vector<std::pair<std::string, bool>> subMembers;
+		bool subFunctionCall = false;
+		ParseMembers(tokenizer, subMembers, &subFunctionCall);
+		chainExpr = ParseExpressionChain(tokenizer, chainExpr, subMembers, subFunctionCall);
 	}
 
 	return chainExpr;

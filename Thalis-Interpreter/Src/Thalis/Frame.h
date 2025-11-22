@@ -28,6 +28,6 @@ public:
             locals.resize(numLocals);
         }
     }
-private:
+
     std::vector<Value> locals;
 };

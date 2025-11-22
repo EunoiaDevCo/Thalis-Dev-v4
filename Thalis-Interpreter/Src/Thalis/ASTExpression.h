@@ -271,12 +271,13 @@ struct ASTExpressionStaticVariable : public ASTExpression
 	std::vector<std::string> members;
 	uint64 offset;
 	TypeInfo typeInfo;
+	bool isArray;
 
 	ASTExpressionStaticVariable(uint16 classID, const std::vector<std::string>& members) :
-		classID(classID), members(members), offset(UINT64_MAX), typeInfo(INVALID_ID, 0) { }
+		classID(classID), members(members), offset(UINT64_MAX), typeInfo(INVALID_ID, 0), isArray(false) { }
 
-	ASTExpressionStaticVariable(uint16 classID, uint64 offset, const TypeInfo& typeInfo) :
-		classID(classID), offset(offset), typeInfo(typeInfo) { }
+	ASTExpressionStaticVariable(uint16 classID, uint64 offset, const TypeInfo& typeInfo, bool isArray) :
+		classID(classID), offset(offset), typeInfo(typeInfo), isArray(isArray) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
@@ -328,10 +329,11 @@ struct ASTExpressionPushMember : public ASTExpression
 	ASTExpression* expr;
 	std::vector<std::string> members;
 	TypeInfo typeInfo;
+	bool isArray;
 	uint64 offset;
 
 	ASTExpressionPushMember(ASTExpression* expr, const std::vector<std::string>& members) :
-		expr(expr), members(members), typeInfo(INVALID_ID, 0), offset(UINT64_MAX) { }
+		expr(expr), members(members), typeInfo(INVALID_ID, 0), isArray(false), offset(UINT64_MAX) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
@@ -376,4 +378,18 @@ struct ASTExpressionDeclareReference : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+};
+
+struct ASTExpressionConstructorCall : public ASTExpression
+{
+	uint16 type;
+	std::vector<ASTExpression*> argExprs;
+	uint16 functionID;
+
+	ASTExpressionConstructorCall(uint16 type, const std::vector<ASTExpression*> argExprs) :
+		type(type), argExprs(argExprs) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual bool Resolve(Program* program) override;
 };

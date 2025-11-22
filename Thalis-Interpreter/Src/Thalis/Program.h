@@ -38,7 +38,7 @@ enum class OpCode
 
 	SET,
 
-	MODULE_CONSTANT, MEMBER_FUNCTION_CALL,
+	MODULE_CONSTANT, MEMBER_FUNCTION_CALL, CONSTRUCTOR_CALL,
 	MODULE_FUNCTION_CALL, STATIC_FUNCTION_CALL, RETURN,
 
 	JUMP, JUMP_IF_FALSE,
@@ -53,6 +53,7 @@ struct CallFrame
 	bool usesReturnValue;
 	bool popThisStack;
 	uint32 loopCount;
+	uint32 scopeCount;
 };
 
 struct ScopeInfo
@@ -99,8 +100,8 @@ public:
 	void AddPushLocalCommand(uint16 slot);
 	void AddPushTypedNullCommand(uint16 type, uint8 pointerLevel);
 	void AddPushIndexedCommand(uint64 typeSize, uint8 numIndices);
-	void AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16 type, uint8 pointerLevel, bool isReference);
-	void AddPushMemberCommand(uint16 type, uint8 pointerLevel, uint64 offset, bool isReference);
+	void AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16 type, uint8 pointerLevel, bool isReference, bool isArray);
+	void AddPushMemberCommand(uint16 type, uint8 pointerLevel, uint64 offset, bool isReference, bool isArray);
 
 	uint32 AddPushLoopCommand();
 	void AddPopLoopCommand();
@@ -117,6 +118,7 @@ public:
 	void AddStaticFunctionCallCommand(uint16 classID, uint16 functionID, bool usesReturnValue);
 	void AddReturnCommand(uint8 returnInfo);
 	void AddMemberFunctionCallCommand(uint16 classID, uint16 functionID, bool usesReturnValue);
+	void AddConstructorCallCommand(uint16 type, uint16 functionID);
 
 	void AddUnaryUpdateCommand(uint8 op, bool pushToStack);
 
@@ -172,6 +174,9 @@ private:
 
 	void AddFunctionArgsToFrame(Frame* frame, Function* function);
 
+	void AddDestructorRecursive(const Value& value);
+	void ExecutePendingDestructors(uint32 offset);
+
 	void CleanUpForExecution();
 	void InitStatics();
 
@@ -214,6 +219,8 @@ private:
 	HeapAllocator* m_HeapAllocator;
 	BumpAllocator* m_InitializationAllocator;
 	BumpAllocator* m_ReturnAllocator;
+
+	std::vector<Value> m_PendingDestructors;
 
 	std::vector<ASTExpression*> m_CreatedExpressions;
 };
