@@ -30,7 +30,7 @@ class Class
 {
 public:
 	Class(const std::string& name) :
-		m_Name(name), m_NextFunctionID(0), m_Destructor(nullptr) { }
+		m_Name(name), m_BaseName(name), m_NextFunctionID(0), m_Destructor(nullptr), m_AssignSTFunction(nullptr), m_CopyConstructor(nullptr) { }
 
 	std::string GetName() const;
 
@@ -59,11 +59,18 @@ public:
 	uint64 CalculateStaticOffset(Program* program, const std::vector<std::string>& members, TypeInfo* typeInfo, bool* isArray);
 	void* GetStaticData(uint64 offset) const;
 
+	inline bool HasDestructor() const { return m_Destructor != nullptr; }
+	inline bool HasAssignSTFunction() const { return m_AssignSTFunction != nullptr; }
+	inline bool HasCopyConstructor() const { return m_CopyConstructor != nullptr; }
+
 	inline Function* GetDestructor() const { return m_Destructor; }
+	inline Function* GetAssignSTFunction() const { return m_AssignSTFunction; }
+	inline Function* GetCopyConstructor() const { return m_CopyConstructor; }
 private:
 
 private:
 	std::string m_Name;
+	std::string m_BaseName;
 	uint16 m_ID;
 
 	std::unordered_map<std::string, std::vector<Function*>> m_Functions;
@@ -72,6 +79,8 @@ private:
 	uint16 m_NextFunctionID;
 
 	Function* m_Destructor;
+	Function* m_AssignSTFunction;
+	Function* m_CopyConstructor;
 
 	uint64 m_Size;
 

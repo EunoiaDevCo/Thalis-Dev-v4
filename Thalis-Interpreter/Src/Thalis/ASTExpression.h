@@ -4,14 +4,7 @@
 #include "TypeInfo.h"
 #include <vector>
 #include <new>
-
-enum class ASTOperator
-{
-	ADD, MINUS, MULTIPLY, DIVIDE, MOD,
-	EQUALS, NOT_EQUALS, LESS, GREATER, LESS_EQUALS, GREATER_EQUALS,
-	LOGICAL_AND, LOGICAL_OR,
-	BITWISE_OR, BITWISE_AND, BITSHIFT_LEFT, BITSHIFT_RIGHT
-};
+#include "Operator.h"
 
 class Program;
 class Class;
@@ -33,6 +26,17 @@ struct ASTExpressionLiteral : public ASTExpression
 	Value value;
 
 	ASTExpressionLiteral(const Value& value) :
+		value(value) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+};
+
+struct ASTExpressionConstUInt32 : public ASTExpression
+{
+	uint32 value;
+
+	ASTExpressionConstUInt32(uint32 value) :
 		value(value) { }
 
 	virtual void EmitCode(Program* program) override;
@@ -95,12 +99,14 @@ struct ASTExpressionSet : public ASTExpression
 {
 	ASTExpression* expr;
 	ASTExpression* assignExpr;
+	uint16 assignFunctionID;
 
 	ASTExpressionSet(ASTExpression* expr, ASTExpression* assignExpr) :
-		expr(expr), assignExpr(assignExpr) { }
+		expr(expr), assignExpr(assignExpr), assignFunctionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual bool Resolve(Program* program) override;
 };
 
 struct ASTExpressionAddressOf : public ASTExpression
@@ -156,13 +162,15 @@ struct ASTExpressionBinary : public ASTExpression
 {
 	ASTExpression* lhs;
 	ASTExpression* rhs;
-	ASTOperator op;
+	Operator op;
+	uint16 functionID;
 
-	ASTExpressionBinary(ASTExpression* lhs, ASTExpression* rhs, ASTOperator op) :
-		lhs(lhs), rhs(rhs), op(op) { }
+	ASTExpressionBinary(ASTExpression* lhs, ASTExpression* rhs, Operator op) :
+		lhs(lhs), rhs(rhs), op(op), functionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual bool Resolve(Program* program) override;
 };
 
 struct ASTExpressionIfElse : public ASTExpression
@@ -316,12 +324,14 @@ struct ASTExpressionDeclareObjectWithAssign : public ASTExpression
 	uint16 type;
 	uint16 slot;
 	ASTExpression* assignExpr;
+	uint16 copyConstructorID;
 
 	ASTExpressionDeclareObjectWithAssign(uint16 type, uint16 slot, ASTExpression* assignExpr) : 
-		type(type), slot(slot), assignExpr(assignExpr) { }
+		type(type), slot(slot), assignExpr(assignExpr), copyConstructorID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual bool Resolve(Program* program) override;
 };
 
 struct ASTExpressionPushMember : public ASTExpression

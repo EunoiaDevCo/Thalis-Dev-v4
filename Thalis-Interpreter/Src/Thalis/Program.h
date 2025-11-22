@@ -9,6 +9,7 @@
 #include "Memory/HeapAllocator.h"
 #include "FramePool.h"
 #include "Function.h"
+#include "Operator.h"
 
 enum class OpCode
 {
@@ -106,11 +107,13 @@ public:
 	uint32 AddPushLoopCommand();
 	void AddPopLoopCommand();
 
+	void AddSetCommand(uint16 assignFunctionID);
+
 	void AddDeclarePrimitiveCommand(ValueType type, uint16 slot);
 	void AddDeclarePointerCommand(uint16 type, uint8 pointerLevel, uint16 slot);
 	void AddDeclareStackArrayCommand(uint16 type, uint8 elementPointerLevel, uint32* dimensions, uint8 numDimensions, uint32 initializerCount, uint16 slot);
 	void AddDeclareObjectWithConstructorCommand(uint16 type, uint16 functionID, uint16 slot);
-	void AddDeclareObjectWithAssignCommand(uint16 type, uint16 slot);
+	void AddDeclareObjectWithAssignCommand(uint16 type, uint16 slot, uint16 copyConstructorID);
 	void AddDeclareReferenceCommand(uint16 slot);
 
 	void AddModuleConstantCommand(uint16 moduleID, uint16 constant);
@@ -121,6 +124,8 @@ public:
 	void AddConstructorCallCommand(uint16 type, uint16 functionID);
 
 	void AddUnaryUpdateCommand(uint8 op, bool pushToStack);
+
+	void AddAritmaticCommand(Operator op, uint16 functionID);
 
 	void WriteUInt64(uint64 value);
 	void WriteUInt32(uint32 value);
@@ -171,6 +176,8 @@ private:
 	void ExecuteOpCode(OpCode opcode);
 	void ExecuteModuleFunctionCall(uint16 moduleID, uint16 functionID, bool usesReturnValue);
 	void ExecuteModuleConstant(uint16 moduleID, uint16 constant);
+	void ExecuteAssignFunction(const Value& dstValue, const Value& assignValue, Function* function);
+	void ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Function* function);
 
 	void AddFunctionArgsToFrame(Frame* frame, Function* function);
 

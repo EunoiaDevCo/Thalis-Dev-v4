@@ -165,6 +165,15 @@ bool Parser::ParseClass(Tokenizer* tokenizer)
 		break;
 	}
 
+	if (!cls->HasAssignSTFunction())
+	{
+		cls->AddFunction(GenerateDefaultCopyFunction(cls, "operator="));
+	}
+
+	if (!cls->HasCopyConstructor())
+	{
+		cls->AddFunction(GenerateDefaultCopyFunction(cls, className));
+	}
 }
 
 static AccessModifier ParseAccessModifier(Tokenizer* tokenizer)
@@ -274,30 +283,18 @@ bool Parser::ParseFunction(Tokenizer* tokenizer, Class* cls)
 		if (t.type == TokenTypeT::OPERATOR)
 		{
 			t = tokenizer->GetToken();
-			if (t.type == TokenTypeT::EQUALS)
-			{
-				function->name = "operator=";
-			}
-			else if (t.type == TokenTypeT::PLUS)
-			{
-				function->name = "operator+";
-			}
-			else if (t.type == TokenTypeT::MINUS)
-			{
-				function->name = "operator-";
-			}
-			else if (t.type == TokenTypeT::ASTERISK)
-			{
-				function->name = "operator*";
-			}
-			else if (t.type == TokenTypeT::SLASH)
-			{
-				function->name = "operator/";
-			}
-			else if (t.type == TokenTypeT::MOD)
-			{
-				function->name = "operator%";
-			}
+			if (t.type == TokenTypeT::EQUALS) function->name = "operator=";
+			else if (t.type == TokenTypeT::PLUS) function->name = "operator+";
+			else if (t.type == TokenTypeT::MINUS) function->name = "operator-";
+			else if (t.type == TokenTypeT::ASTERISK) function->name = "operator*";
+			else if (t.type == TokenTypeT::SLASH) function->name = "operator/";
+			else if (t.type == TokenTypeT::MOD) function->name = "operator%";
+			else if (t.type == TokenTypeT::EQUALS_EQUALS) function->name = "operator==";
+			else if (t.type == TokenTypeT::NOT_EQUAL) function->name = "operator!=";
+			else if (t.type == TokenTypeT::LESS) function->name = "operator<";
+			else if (t.type == TokenTypeT::GREATER) function->name = "operator>";
+			else if (t.type == TokenTypeT::LESS_EQUALS) function->name = "operator<=";
+			else if (t.type == TokenTypeT::GREATER_EQUALS) function->name = "operator>=";
 		}
 		else if (t.type == TokenTypeT::IDENTIFIER)
 		{
@@ -1126,29 +1123,29 @@ ASTExpression* Parser::ParseBinaryOpRHS(int32 exprPrec, ASTExpression* lhs, Toke
 			if (!rhs) return nullptr;
 		}
 
-		ASTOperator opEnum;
+		Operator opEnum;
 		switch (opToken.type)
 		{
-		case TokenTypeT::PLUS:          opEnum = ASTOperator::ADD; break;
-		case TokenTypeT::MINUS:         opEnum = ASTOperator::MINUS; break;
-		case TokenTypeT::ASTERISK:      opEnum = ASTOperator::MULTIPLY; break;
-		case TokenTypeT::SLASH:         opEnum = ASTOperator::DIVIDE; break;
-		case TokenTypeT::MOD:		   opEnum = ASTOperator::MOD; break;
+		case TokenTypeT::PLUS:          opEnum = Operator::ADD; break;
+		case TokenTypeT::MINUS:         opEnum = Operator::MINUS; break;
+		case TokenTypeT::ASTERISK:      opEnum = Operator::MULTIPLY; break;
+		case TokenTypeT::SLASH:         opEnum = Operator::DIVIDE; break;
+		case TokenTypeT::MOD:		   opEnum = Operator::MOD; break;
 
-		case TokenTypeT::LESS:          opEnum = ASTOperator::LESS; break;
-		case TokenTypeT::LESS_EQUALS:    opEnum = ASTOperator::LESS_EQUALS; break;
-		case TokenTypeT::GREATER:       opEnum = ASTOperator::GREATER; break;
-		case TokenTypeT::GREATER_EQUALS: opEnum = ASTOperator::GREATER_EQUALS; break;
-		case TokenTypeT::EQUALS_EQUALS:   opEnum = ASTOperator::EQUALS; break;
-		case TokenTypeT::NOT_EQUAL:    opEnum = ASTOperator::NOT_EQUALS; break;
+		case TokenTypeT::LESS:          opEnum = Operator::LESS; break;
+		case TokenTypeT::LESS_EQUALS:    opEnum = Operator::LESS_EQUALS; break;
+		case TokenTypeT::GREATER:       opEnum = Operator::GREATER; break;
+		case TokenTypeT::GREATER_EQUALS: opEnum = Operator::GREATER_EQUALS; break;
+		case TokenTypeT::EQUALS_EQUALS:   opEnum = Operator::EQUALS; break;
+		case TokenTypeT::NOT_EQUAL:    opEnum = Operator::NOT_EQUALS; break;
 
-		case TokenTypeT::LOGICAL_AND: opEnum = ASTOperator::LOGICAL_AND; break;
-		case TokenTypeT::LOGICAL_OR: opEnum = ASTOperator::LOGICAL_OR; break;
+		case TokenTypeT::LOGICAL_AND: opEnum = Operator::LOGICAL_AND; break;
+		case TokenTypeT::LOGICAL_OR: opEnum = Operator::LOGICAL_OR; break;
 
-		case TokenTypeT::AND: opEnum = ASTOperator::BITWISE_AND; break;
-		case TokenTypeT::PIPE: opEnum = ASTOperator::BITWISE_OR; break;
-		case TokenTypeT::BITSHIFT_LEFT: opEnum = ASTOperator::BITSHIFT_LEFT; break;
-		case TokenTypeT::BITSHIFT_RIGHT: opEnum = ASTOperator::BITSHIFT_RIGHT; break;
+		case TokenTypeT::AND: opEnum = Operator::BITWISE_AND; break;
+		case TokenTypeT::PIPE: opEnum = Operator::BITWISE_OR; break;
+		case TokenTypeT::BITSHIFT_LEFT: opEnum = Operator::BITSHIFT_LEFT; break;
+		case TokenTypeT::BITSHIFT_RIGHT: opEnum = Operator::BITSHIFT_RIGHT; break;
 
 		default: return lhs; // shouldnt happen
 		}
@@ -1774,4 +1771,91 @@ ASTExpressionModuleConstant* Parser::MakeModuleConstant(uint16 moduleID, const s
 	}
 
 	return new ASTExpressionModuleConstant(moduleID, constant);
+}
+
+Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& name)
+{
+	Function* function = new Function();
+	function->accessModifier = AccessModifier::PUBLIC;
+	function->isStatic = false;
+	function->isVirtual = false;
+	function->name = name;
+	function->returnInfo = TypeInfo((uint16)ValueType::VOID_T, 0);
+	function->numLocals = 1;
+	function->returnsReference = false;
+
+	Scope* functionScope = new Scope();
+
+	FunctionParameter parameter;
+	parameter.isReference = true;
+	parameter.type = TypeInfo(cls->GetID(), 0);
+	parameter.variableID = functionScope->AddLocal("#TLS_Other", TypeInfo(cls->GetID(), 0));
+	function->parameters.push_back(parameter);
+
+	const std::vector<ClassField>& members = cls->GetMemberFields();
+	std::vector<std::string> membs;
+	membs.resize(1);
+	for (uint32 i = 0; i < members.size(); i++)
+	{
+		const ClassField& member = members[i];
+		membs[0] = member.name;
+
+		if (member.numDimensions > 0)
+		{
+			std::vector<uint16> indexLocals;
+			indexLocals.reserve(member.numDimensions);
+
+			for (uint32 d = 0; d < member.numDimensions; d++)
+			{
+				std::string idxName = "#TLS_idx_" + std::to_string(i) + "_" + std::to_string(d);
+				indexLocals.push_back(functionScope->AddLocal(idxName, TypeInfo((uint16)ValueType::UINT32, 0)));
+			}
+
+			ASTExpression* thisMember = new ASTExpressionPushMember(new ASTExpressionDereference(new ASTExpressionThis(cls->GetID())), membs);
+			ASTExpression* otherMember = new ASTExpressionPushMember(new ASTExpressionPushLocal(parameter.variableID, parameter.type), membs);
+
+			std::vector<ASTExpression*> indexExprs;
+			for (uint32 d = 0; d < member.numDimensions; d++)
+			{
+				indexExprs.push_back(new ASTExpressionPushLocal(indexLocals[d], TypeInfo((uint16)ValueType::UINT32, 0)));
+			}
+
+			thisMember = new ASTExpressionPushIndex(thisMember, indexExprs);
+			otherMember = new ASTExpressionPushIndex(otherMember, indexExprs);
+
+			ASTExpressionSet* innerAssign = new ASTExpressionSet(thisMember, otherMember);
+
+			ASTExpression* loopBody = innerAssign;
+
+			for (int32 dim = member.numDimensions - 1; dim >= 0; dim--)
+			{
+				uint16 idx = indexLocals[dim];
+
+				ASTExpressionDeclarePrimitive* declareExpr = new ASTExpressionDeclarePrimitive(ValueType::UINT32, idx);
+
+				ASTExpressionBinary* condExpr = new ASTExpressionBinary(
+					new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::INT32, 0)),
+					new ASTExpressionConstUInt32(member.dimensions[dim]),
+					Operator::LESS);
+
+				ASTExpressionUnaryUpdate* incrExpr = new ASTExpressionUnaryUpdate(new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::UINT32, 0)), ASTUnaryUpdateOp::PRE_INC);
+
+				std::vector<ASTExpression*> bodyBlock = { loopBody };
+
+				loopBody = new ASTExpressionFor(declareExpr, condExpr, incrExpr, bodyBlock);
+			}
+
+			function->body.push_back(loopBody);
+		}
+		else
+		{
+			ASTExpressionPushMember* pushMemberExpr = new ASTExpressionPushMember(new ASTExpressionDereference(new ASTExpressionThis(cls->GetID())), membs); //Access this->member
+			ASTExpressionPushMember* pushParamExpr = new ASTExpressionPushMember(new ASTExpressionPushLocal(parameter.variableID, parameter.type), membs); //Access param.member
+			ASTExpressionSet* setExpr = new ASTExpressionSet(pushMemberExpr, pushParamExpr);
+			function->body.push_back(setExpr);
+		}
+	}
+
+	delete functionScope;
+	return function;
 }

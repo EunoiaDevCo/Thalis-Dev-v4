@@ -25,6 +25,20 @@ void Class::AddFunction(Function* function)
 	{
 		m_Destructor = function;
 	}
+
+	if (function->name == "operator=" && function->parameters.size() == 1 &&
+		function->parameters[0].type.type == m_ID &&
+		function->parameters[0].type.pointerLevel == 0)
+	{
+		m_AssignSTFunction = function;
+	}
+
+	if (function->name == m_BaseName && function->parameters.size() == 1 &&
+		function->parameters[0].type.type == m_ID &&
+		function->parameters[0].type.pointerLevel == 0)
+	{
+		m_CopyConstructor = function;
+	}
 }
 
 Function* Class::GetFunction(uint16 id)

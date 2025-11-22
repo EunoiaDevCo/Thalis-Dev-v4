@@ -181,6 +181,12 @@ void Program::AddPopLoopCommand()
 	WriteOPCode(OpCode::POP_LOOP);
 }
 
+void Program::AddSetCommand(uint16 assignFunctionID)
+{
+	WriteOPCode(OpCode::SET);
+	WriteUInt16(assignFunctionID);
+}
+
 void Program::AddDeclarePrimitiveCommand(ValueType type, uint16 slot)
 {
 	switch (type)
@@ -230,11 +236,12 @@ void Program::AddDeclareObjectWithConstructorCommand(uint16 type, uint16 functio
 	WriteUInt16(slot);
 }
 
-void Program::AddDeclareObjectWithAssignCommand(uint16 type, uint16 slot)
+void Program::AddDeclareObjectWithAssignCommand(uint16 type, uint16 slot, uint16 copyConstructorID)
 {
 	WriteOPCode(OpCode::DECLARE_OBJECT_WITH_ASSIGN);
 	WriteUInt16(type);
 	WriteUInt16(slot);
+	WriteUInt16(copyConstructorID);
 }
 
 void Program::AddDeclareReferenceCommand(uint16 slot)
@@ -293,6 +300,26 @@ void Program::AddUnaryUpdateCommand(uint8 op, bool pushToStack)
 	WriteOPCode(OpCode::UNARY_UPDATE);
 	WriteUInt8(op);
 	WriteUInt8(pushToStack);
+}
+
+void Program::AddAritmaticCommand(Operator op, uint16 functionID)
+{
+	switch (op)
+	{
+	case Operator::ADD: WriteOPCode(OpCode::ADD); break;
+	case Operator::MINUS: WriteOPCode(OpCode::SUBTRACT); break;
+	case Operator::MULTIPLY: WriteOPCode(OpCode::MULTIPLY); break;
+	case Operator::DIVIDE: WriteOPCode(OpCode::DIVIDE); break;
+	case Operator::MOD: WriteOPCode(OpCode::MOD); break;
+	case Operator::EQUALS: WriteOPCode(OpCode::EQUALS); break;
+	case Operator::NOT_EQUALS: WriteOPCode(OpCode::NOT_EQUALS); break;
+	case Operator::LESS: WriteOPCode(OpCode::LESS); break;
+	case Operator::GREATER: WriteOPCode(OpCode::GREATER); break;
+	case Operator::LESS_EQUALS: WriteOPCode(OpCode::LESS_EQUAL); break;
+	case Operator::GREATER_EQUALS: WriteOPCode(OpCode::GREATER_EQUAL); break;
+	}
+
+	WriteUInt16(functionID);
 }
 
 void Program::WriteUInt64(uint64 value)
@@ -800,15 +827,27 @@ void Program::ExecuteOpCode(OpCode opcode)
 	case OpCode::DECLARE_OBJECT_WITH_ASSIGN: {
 		uint16 type = ReadUInt16();
 		uint16 slot = ReadUInt16();
+		uint16 copyConstructorID = ReadUInt16();
 
 		Value assignValue = m_Stack.back();
 		m_Stack.pop_back();
 
 		Value object = Value::MakeObject(this, type, m_StackAllocator);
-		uint64 size = GetClass(type)->GetSize();
-		object.Assign(assignValue, size);
 		m_FrameStack.back()->DeclareLocal(slot, object);
 		m_ScopeStack[m_CurrentScope].objects.push_back(object);
+
+		if (copyConstructorID != INVALID_ID)
+		{
+			Class* cls = GetClass(type);
+			Function* copyConstructorFunction = cls->GetFunction(copyConstructorID);
+
+			ExecuteAssignFunction(object, assignValue, copyConstructorFunction);
+		}
+		else
+		{
+			uint64 size = GetClass(type)->GetSize();
+			object.Assign(assignValue, size);
+		}
 	} break;
 	case OpCode::DECLARE_REFERENCE: {
 		uint16 slot = ReadUInt16();
@@ -820,9 +859,21 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_FrameStack.back()->DeclareLocal(slot, reference);
 	} break;
 	case OpCode::SET: {
+		uint16 assignFunctionID = ReadUInt16();
 		Value variable = m_Stack.back(); m_Stack.pop_back();
 		Value assignValue = m_Stack.back(); m_Stack.pop_back();
-		variable.Assign(assignValue, GetTypeSize(variable.type));
+
+		if (assignFunctionID == INVALID_ID)
+		{
+			variable.Assign(assignValue, GetTypeSize(variable.type));
+		}
+		else
+		{
+			Class* cls = GetClass(variable.type);
+			Function* assignFunction = cls->GetFunction(assignFunctionID);
+
+			ExecuteAssignFunction(variable, assignValue, assignFunction);
+		}
 	} break;
 	case OpCode::MODULE_CONSTANT: {
 		uint16 moduleID = ReadUInt16();
@@ -1008,78 +1059,190 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_Stack.push_back(value);
 	} break;
 	case OpCode::ADD: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.Add(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.Add(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::SUBTRACT: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.Sub(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.Sub(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::MULTIPLY: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.Mul(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.Mul(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::DIVIDE: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.Div(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.Div(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::MOD: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.Mod(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.Mod(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::LESS: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.LessThan(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.LessThan(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::GREATER: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.GreaterThan(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.GreaterThan(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::LESS_EQUAL: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.LessThanOrEqual(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.LessThanOrEqual(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::GREATER_EQUAL: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.GreaterThanOrEqual(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.GreaterThanOrEqual(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::EQUALS: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.Equals(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.Equals(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::NOT_EQUALS: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		Value value = lhs.NotEquals(rhs, m_StackAllocator);
-		m_Stack.push_back(value);
+		if (functionID != INVALID_ID)
+		{
+			Class* cls = GetClass(lhs.type);
+			Function* function = cls->GetFunction(functionID);
+			ExecuteArithmaticFunction(lhs, rhs, function);
+		}
+		else
+		{
+			Value value = lhs.NotEquals(rhs, m_StackAllocator);
+			m_Stack.push_back(value);
+		}
 	} break;
 	case OpCode::LOGICAL_AND: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
 		Value value = lhs.LogicalAnd(rhs, m_StackAllocator);
 		m_Stack.push_back(value);
 	} break;
 	case OpCode::LOGICAL_OR: {
+		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
 		Value value = lhs.LogicalOr(rhs, m_StackAllocator);
@@ -1200,6 +1363,63 @@ void Program::ExecuteModuleConstant(uint16 moduleID, uint16 constant)
 	}
 }
 
+void Program::ExecuteAssignFunction(const Value& dstValue, const Value& assignValue, Function* function)
+{
+	CallFrame callFrame;
+	callFrame.basePointer = m_Stack.size();
+	callFrame.popThisStack = true;
+	callFrame.returnPC = m_ProgramCounter;
+	callFrame.usesReturnValue = false;
+	callFrame.loopCount = m_LoopStack.size();
+
+	m_CurrentScope++;
+	m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+	callFrame.scopeCount = m_CurrentScope;
+
+	m_Stack.push_back(assignValue);
+	Frame* frame = m_FramePool.Acquire(function->numLocals);
+	AddFunctionArgsToFrame(frame, function);
+
+	m_ThisStack.push_back(Value::MakePointer(dstValue.type, 1, dstValue.data, m_StackAllocator));
+
+	m_CallStack.push_back(callFrame);
+	m_FrameStack.push_back(frame);
+
+	m_ProgramCounter = function->pc;
+
+	while (m_ProgramCounter != callFrame.returnPC)
+	{
+		OpCode innerOpCode = ReadOPCode();
+		if (innerOpCode == OpCode::END) break;
+		ExecuteOpCode(innerOpCode);
+	}
+}
+
+void Program::ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Function* function)
+{
+	CallFrame callFrame;
+	callFrame.basePointer = m_Stack.size();
+	callFrame.popThisStack = true;
+	callFrame.returnPC = m_ProgramCounter;
+	callFrame.usesReturnValue = true;
+	callFrame.loopCount = m_LoopStack.size();
+
+	m_CurrentScope++;
+	m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+	callFrame.scopeCount = m_CurrentScope;
+
+	m_Stack.push_back(rhs);
+	Frame* frame = m_FramePool.Acquire(function->numLocals);
+	AddFunctionArgsToFrame(frame, function);
+
+	m_ThisStack.push_back(Value::MakePointer(lhs.type, 1, lhs.data, m_StackAllocator));
+
+	m_CallStack.push_back(callFrame);
+	m_FrameStack.push_back(frame);
+
+	m_ProgramCounter = function->pc;
+}
+
 void Program::AddFunctionArgsToFrame(Frame* frame, Function* function)
 {
 	for (int32 i = function->parameters.size() - 1; i >= 0; i--)
@@ -1208,7 +1428,14 @@ void Program::AddFunctionArgsToFrame(Frame* frame, Function* function)
 		Value arg = m_Stack.back(); m_Stack.pop_back();
 		if (!param.isReference)
 		{
+			Value original = arg;
 			arg = arg.Clone(this, m_StackAllocator);
+			if (!Value::IsPrimitiveType(param.type.type) && param.type.pointerLevel == 0)
+			{
+				Class* cls = GetClass(param.type.type);
+				Function* copyConstructor = cls->GetCopyConstructor();
+				ExecuteAssignFunction(arg, original, copyConstructor);
+			}
 		}
 		
 		if (arg.type != param.type.type)
@@ -1217,8 +1444,10 @@ void Program::AddFunctionArgsToFrame(Frame* frame, Function* function)
 			{
 				throw std::runtime_error("Reference type mismatch");
 			}
-
-			arg = arg.CastTo(this, param.type.type, param.type.pointerLevel, m_StackAllocator);
+			else
+			{
+				arg = arg.CastTo(this, param.type.type, param.type.pointerLevel, m_StackAllocator);
+			}
 		}
 
 		frame->DeclareLocal(param.variableID, arg);

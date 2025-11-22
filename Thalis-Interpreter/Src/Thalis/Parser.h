@@ -41,6 +41,8 @@ private:
 	ASTExpressionModuleFunctionCall* MakeModuleFunctionCall(uint16 moduleID, const std::string& moduleName, const std::string& functionCall, const std::vector<ASTExpression*>& args);
 	ASTExpressionModuleConstant* MakeModuleConstant(uint16 moduleID, const std::string& moduleName, const std::string& constantName);
 
+	Function* GenerateDefaultCopyFunction(Class* cls, const std::string& name);
+
 	Program* m_Program;
 	std::vector<Scope*> m_ScopeStack;
 

@@ -48,6 +48,16 @@ TypeInfo ASTExpressionLiteral::GetTypeInfo(Program* program)
 	return TypeInfo(value.type, value.pointerLevel);
 }
 
+void ASTExpressionConstUInt32::EmitCode(Program* program)
+{
+	program->AddPushConstantUInt32Command(value);
+}
+
+TypeInfo ASTExpressionConstUInt32::GetTypeInfo(Program* program)
+{
+	return TypeInfo((uint16)ValueType::UINT32, 0);
+}
+
 void ASTExpressionModuleFunctionCall::EmitCode(Program* program)
 {
 	for (int32 i = argExprs.size() - 1; i >= 0; i--)
@@ -129,12 +139,24 @@ void ASTExpressionSet::EmitCode(Program* program)
 {
 	assignExpr->EmitCode(program);
 	expr->EmitCode(program);
-	program->WriteOPCode(OpCode::SET);
+	program->AddSetCommand(assignFunctionID);
 }
 
 TypeInfo ASTExpressionSet::GetTypeInfo(Program* program)
 {
 	return expr->GetTypeInfo(program);
+}
+
+bool ASTExpressionSet::Resolve(Program* program)
+{
+	TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
+	if (exprTypeInfo.pointerLevel > 0 || Value::IsPrimitiveType(exprTypeInfo.type)) return true;
+
+	Class* cls = program->GetClass(exprTypeInfo.type);
+	std::vector<ASTExpression*> argExprs;
+	argExprs.push_back(assignExpr);
+	assignFunctionID = cls->GetFunctionID("operator=", argExprs);
+	return true;
 }
 
 void ASTExpressionAddressOf::EmitCode(Program* program)
@@ -205,22 +227,7 @@ void ASTExpressionBinary::EmitCode(Program* program)
 	lhs->EmitCode(program);
 	rhs->EmitCode(program);
 
-	switch (op)
-	{
-	case ASTOperator::ADD: program->WriteOPCode(OpCode::ADD); break;
-	case ASTOperator::MINUS: program->WriteOPCode(OpCode::SUBTRACT); break;
-	case ASTOperator::MULTIPLY: program->WriteOPCode(OpCode::MULTIPLY); break;
-	case ASTOperator::DIVIDE: program->WriteOPCode(OpCode::DIVIDE); break;
-	case ASTOperator::MOD: program->WriteOPCode(OpCode::MOD); break;
-	case ASTOperator::LESS: program->WriteOPCode(OpCode::LESS); break;
-	case ASTOperator::GREATER: program->WriteOPCode(OpCode::GREATER); break;
-	case ASTOperator::LESS_EQUALS: program->WriteOPCode(OpCode::LESS_EQUAL); break;
-	case ASTOperator::GREATER_EQUALS: program->WriteOPCode(OpCode::GREATER_EQUAL); break;
-	case ASTOperator::EQUALS: program->WriteOPCode(OpCode::EQUALS); break;
-	case ASTOperator::NOT_EQUALS: program->WriteOPCode(OpCode::NOT_EQUALS); break;
-	case ASTOperator::LOGICAL_OR: program->WriteOPCode(OpCode::LOGICAL_OR); break;
-	case ASTOperator::LOGICAL_AND: program->WriteOPCode(OpCode::LOGICAL_AND); break;
-	}
+	program->AddAritmaticCommand(op, functionID);
 }
 
 TypeInfo ASTExpressionBinary::GetTypeInfo(Program* program)
@@ -239,10 +246,62 @@ TypeInfo ASTExpressionBinary::GetTypeInfo(Program* program)
 	}
 	else
 	{
-		return TypeInfo(INVALID_ID, 0);
+		Class* cls = program->GetClass(leftType.type);
+		std::vector<ASTExpression*> args;
+		args.push_back(rhs);
+		if (functionID == INVALID_ID)
+		{
+			switch (op)
+			{
+			case Operator::ADD:		functionID = cls->GetFunctionID("operator+", args); break;
+			case Operator::MINUS:	functionID = cls->GetFunctionID("operator-", args); break;
+			case Operator::MULTIPLY: functionID = cls->GetFunctionID("operator*", args); break;
+			case Operator::DIVIDE:	functionID = cls->GetFunctionID("operator/", args); break;
+			case Operator::MOD:		functionID = cls->GetFunctionID("operator%", args); break;
+			case Operator::EQUALS:		functionID = cls->GetFunctionID("operator==", args); break;
+			case Operator::NOT_EQUALS:		functionID = cls->GetFunctionID("operator!=", args); break;
+			case Operator::LESS:		functionID = cls->GetFunctionID("operator<", args); break;
+			case Operator::GREATER:		functionID = cls->GetFunctionID("operator>", args); break;
+			case Operator::LESS_EQUALS:		functionID = cls->GetFunctionID("operator<=", args); break;
+			case Operator::GREATER_EQUALS:		functionID = cls->GetFunctionID("operator>=", args); break;
+			}
+		}
+
+		if (functionID != INVALID_ID)
+		{
+			return cls->GetFunction(functionID)->returnInfo;
+		}
 	}
 
 	return TypeInfo(INVALID_ID, 0);
+}
+
+bool ASTExpressionBinary::Resolve(Program* program)
+{
+	TypeInfo lhsType = lhs->GetTypeInfo(program);
+	if (Value::IsPrimitiveType(lhsType.type)) return true;
+	if (lhsType.pointerLevel > 0) return true;
+
+	Class* cls = program->GetClass(lhsType.type);
+	std::vector<ASTExpression*> args;
+	args.push_back(rhs);
+
+	switch (op)
+	{
+	case Operator::ADD:				functionID = cls->GetFunctionID("operator+", args); break;
+	case Operator::MINUS:			functionID = cls->GetFunctionID("operator-", args); break;
+	case Operator::MULTIPLY:			functionID = cls->GetFunctionID("operator*", args); break;
+	case Operator::DIVIDE:			functionID = cls->GetFunctionID("operator/", args); break;
+	case Operator::MOD:				functionID = cls->GetFunctionID("operator%", args); break;
+	case Operator::EQUALS:			functionID = cls->GetFunctionID("operator==", args); break;
+	case Operator::NOT_EQUALS:		functionID = cls->GetFunctionID("operator!=", args); break;
+	case Operator::LESS:				functionID = cls->GetFunctionID("operator<", args); break;
+	case Operator::GREATER:			functionID = cls->GetFunctionID("operator>", args); break;
+	case Operator::LESS_EQUALS:		functionID = cls->GetFunctionID("operator<=", args); break;
+	case Operator::GREATER_EQUALS:	functionID = cls->GetFunctionID("operator>=", args); break;
+	}
+
+	return true;
 }
 
 void ASTExpressionIfElse::EmitCode(Program* program)
@@ -491,12 +550,21 @@ bool ASTExpressionDeclareObjectWithConstructor::Resolve(Program* program)
 void ASTExpressionDeclareObjectWithAssign::EmitCode(Program* program)
 {
 	assignExpr->EmitCode(program);
-	program->AddDeclareObjectWithAssignCommand(type, slot);
+	program->AddDeclareObjectWithAssignCommand(type, slot, copyConstructorID);
 }
 
 TypeInfo ASTExpressionDeclareObjectWithAssign::GetTypeInfo(Program* program)
 {
 	return TypeInfo(type, 0);
+}
+
+bool ASTExpressionDeclareObjectWithAssign::Resolve(Program* program)
+{
+	Class* cls = program->GetClass(type);
+	std::vector<ASTExpression*> argExprs;
+	argExprs.push_back(assignExpr);
+	copyConstructorID = cls->GetFunctionID(cls->GetName(), argExprs);
+	return true;
 }
 
 void ASTExpressionPushMember::EmitCode(Program* program)

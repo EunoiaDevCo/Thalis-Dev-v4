@@ -1,56 +1,19 @@
 Import IO;
 
-class Vec2
+
+class List -> template[class T]
 {
-	public Vec2(real32 x, real32 y)
-	{
-		this->x = x;
-		this->y = y;
-	}
-
-	public ~Vec2()
-	{
-		IO.Println("Called ~Vec2()");
-	}
-
-	public void Set(real32 x, real32 y)
-	{
-		this->x = x;
-		this->y = y;
-	}
-
-	public void Print()
-	{
-		IO.Print("(");
-		IO.Print(x);
-		IO.Print(", ");
-		IO.Print(y);
-		IO.Println(")");
-	}
-
-	public real32 x;
-	public real32 y;
-};
-
-class Transform
-{
-	public ~Transform()
-	{
-		IO.Println("~Transform");
-	}
-
-	public Vec2& GetPos() { return pos; }
-
-	public Vec2 pos[100];
+	
 };
 
 class Main
 {
 	public static void Main()
 	{
-		Transform t;
+		Vec2 v1(10.0, 10.0);
+		Vec2 v2(30.0, 30.0);
 
-		t.pos[10].Set(10.0, 10.0);
-		t.pos[10].Print();
+		Vec2 v3 = v1 + v2;
+		v3.Print();
 	}
 };

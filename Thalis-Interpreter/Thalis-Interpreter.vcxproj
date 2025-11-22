@@ -27,6 +27,7 @@
     <ClInclude Include="Src\Thalis\Memory\Memory.h" />
     <ClInclude Include="Src\Thalis\Modules\IOModule.h" />
     <ClInclude Include="Src\Thalis\Modules\ModuleID.h" />
+    <ClInclude Include="Src\Thalis\Operator.h" />
     <ClInclude Include="Src\Thalis\Parser.h" />
     <ClInclude Include="Src\Thalis\Program.h" />
     <ClInclude Include="Src\Thalis\Scope.h" />
