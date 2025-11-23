@@ -18,7 +18,8 @@ Value Value::Clone(Program* program, Allocator* allocator) const
 	else if (IsPointer())
 	{
 		value.data = allocator->Alloc(sizeof(void*));
-		*(void**)value.data = data;
+
+		*(void**)value.data = *(void**)data;
 	}
 	else
 	{
@@ -92,6 +93,7 @@ Value Value::MakeArray(Program* program, uint16 type, uint8 elementPointerLevel,
 	array.pointerLevel = 1 + elementPointerLevel;
 	array.isArray = true;
 	array.data = arrayData + sizeof(ArrayHeader);
+	array.isReference = false;
 
 	return array;
 }

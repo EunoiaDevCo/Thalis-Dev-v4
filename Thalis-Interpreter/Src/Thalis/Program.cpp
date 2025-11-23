@@ -322,6 +322,20 @@ void Program::AddAritmaticCommand(Operator op, uint16 functionID)
 	WriteUInt16(functionID);
 }
 
+void Program::AddNewCommand(uint16 type, uint16 functionID)
+{
+	WriteOPCode(OpCode::NEW);
+	WriteUInt16(type);
+	WriteUInt16(functionID);
+}
+
+void Program::AddNewArrayCommand(uint16 type, uint8 pointerLevel)
+{
+	WriteOPCode(OpCode::NEW_ARRAY);
+	WriteUInt16(type);
+	WriteUInt8(pointerLevel);
+}
+
 void Program::WriteUInt64(uint64 value)
 {
 	uint8* bytes = reinterpret_cast<uint8*>(&value);
@@ -592,7 +606,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint8 numIndices = ReadUInt8();
 		for (uint8 i = 0; i < numIndices; i++)
 		{
-			m_Dimensions[i] = m_Stack.back().GetUInt32();
+			m_Dimensions[i] = m_Stack.back().Actual().GetUInt32();
 			m_Stack.pop_back();
 		}
 
@@ -605,7 +619,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		element.isArray = false;
 		element.isReference = false;
 		
-		if (base.isArray) //stack array
+		if (base.isArray)
 		{
 			uint32 index = base.Calculate1DArrayIndex(m_Dimensions);
 
@@ -620,18 +634,18 @@ void Program::ExecuteOpCode(OpCode opcode)
 		}
 		else if (base.IsPointer())
 		{
-			uint8* ptr = (uint8*)base.data;
+			void* ptr = base.data;
 
 			uint8 pointerLevel = element.pointerLevel;
 			for (uint32 i = 0; i < numIndices; i++)
 			{
 				if (pointerLevel > 0)
 				{
-					ptr = *(uint8**)((uint8*)ptr + m_Dimensions[i] * sizeof(void*));
+					ptr = (void**)((uint8*)ptr + m_Dimensions[i] * sizeof(void*));
 				}
 				else
 				{
-					ptr += m_Dimensions[i] * typeSize;
+					ptr = (uint8*)ptr + m_Dimensions[i] * typeSize;
 				}
 
 				pointerLevel--;
@@ -675,6 +689,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 	} break;
 	case OpCode::PUSH_THIS: {
 		m_Stack.push_back(m_ThisStack.back());
+		uint32 bp = 0;
 	} break;
 	case OpCode::DECLARE_UINT8: {
 		uint16 slot = ReadUInt16();
@@ -1340,6 +1355,93 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_ScopeStack.resize(loop.scopeCount + 1);
 		m_ProgramCounter = loop.startPC;
 	} break;
+	case OpCode::NEW: {
+		uint16 type = ReadUInt16();
+		uint16 functionID = ReadUInt16();
+		Value object = Value::MakeObject(this, type, m_HeapAllocator);
+		Value pointer = Value::MakePointer(type, 1, object.data, m_StackAllocator);
+
+
+		if (functionID != INVALID_ID)
+		{
+			Function* function = GetClass(type)->GetFunction(functionID);
+
+			CallFrame callFrame;
+			callFrame.basePointer = m_Stack.size();
+			callFrame.popThisStack = true;
+			callFrame.returnPC = m_ProgramCounter;
+			callFrame.usesReturnValue = false;
+			callFrame.loopCount = m_LoopStack.size();
+
+			m_CurrentScope++;
+			m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+			callFrame.scopeCount = m_CurrentScope;
+
+			Frame* frame = m_FramePool.Acquire(function->numLocals);
+			AddFunctionArgsToFrame(frame, function);
+
+			m_ThisStack.push_back(pointer);
+
+			m_CallStack.push_back(callFrame);
+			m_FrameStack.push_back(frame);
+
+			m_ProgramCounter = function->pc;
+		}
+
+		m_Stack.push_back(pointer);
+	} break;
+	case OpCode::NEW_ARRAY: {
+		uint16 type = ReadUInt16();
+		uint8 pointerLevel = ReadUInt8();
+		uint32 size = m_Stack.back().Actual().GetUInt32();
+		m_Stack.pop_back();
+
+		Value array = Value::MakeArray(this, type, pointerLevel, &size, 1, m_HeapAllocator);
+		Value pointer = Value::MakePointer(type, pointerLevel + 1, array.data, m_StackAllocator);
+		//pointer.isArray = true;
+		m_Stack.push_back(pointer);
+	} break;
+	case OpCode::DELETE: {
+		Value object = m_Stack.back();
+		m_Stack.pop_back();
+
+		object = object.Dereference();
+
+		uint32 dcount = m_PendingDestructors.size();
+		AddDestructorRecursive(object);
+		ExecutePendingDestructors(dcount);
+
+		m_HeapAllocator->Free(object.data);
+	} break;
+	case OpCode::DELETE_ARRAY: {
+		Value heapArray = m_Stack.back().Dereference();
+		m_Stack.pop_back();
+
+		Class* cls = GetClass(heapArray.type);
+		ArrayHeader* arrayHeader = (ArrayHeader*)((uint8*)heapArray.data - sizeof(ArrayHeader));
+		if (arrayHeader->elementPointerLevel == 0)
+		{
+			uint32 dcount = m_PendingDestructors.size();
+			uint64 typeSize = cls->GetSize();
+			uint32 numElements = 1;
+			for (uint32 i = 0; i < arrayHeader->numDimensions; i++)
+				numElements *= arrayHeader->dimensions[i];
+
+			for (uint32 i = 0; i < numElements; i++)
+			{
+				Value element;
+				element.type = heapArray.type;
+				element.isArray = false;
+				element.pointerLevel = 0;
+				element.data = (uint8*)heapArray.data + (typeSize * i);
+				AddDestructorRecursive(element);
+			}
+
+			ExecutePendingDestructors(dcount);
+		}
+
+		m_HeapAllocator->Free((uint8*)heapArray.data - sizeof(ArrayHeader));
+	} break;
 	}
 }
 
@@ -1428,13 +1530,17 @@ void Program::AddFunctionArgsToFrame(Frame* frame, Function* function)
 		Value arg = m_Stack.back(); m_Stack.pop_back();
 		if (!param.isReference)
 		{
-			Value original = arg;
-			arg = arg.Clone(this, m_StackAllocator);
 			if (!Value::IsPrimitiveType(param.type.type) && param.type.pointerLevel == 0)
 			{
+				Value original = arg;
 				Class* cls = GetClass(param.type.type);
 				Function* copyConstructor = cls->GetCopyConstructor();
+				arg = Value::MakeObject(this, arg.type, m_StackAllocator);
 				ExecuteAssignFunction(arg, original, copyConstructor);
+			}
+			else
+			{
+				arg = arg.Clone(this, m_StackAllocator);
 			}
 		}
 		

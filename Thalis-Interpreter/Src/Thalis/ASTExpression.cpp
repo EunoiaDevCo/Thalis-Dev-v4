@@ -672,3 +672,46 @@ bool ASTExpressionConstructorCall::Resolve(Program* program)
 	functionID = cls->GetFunctionID(cls->GetName(), argExprs);
 	return functionID != INVALID_ID;
 }
+
+void ASTExpressionNew::EmitCode(Program* program)
+{
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		argExprs[i]->EmitCode(program);
+
+	program->AddNewCommand(type, functionID);
+}
+
+TypeInfo ASTExpressionNew::GetTypeInfo(Program* program)
+{
+	return TypeInfo(type, 1);
+}
+
+bool ASTExpressionNew::Resolve(Program* program)
+{
+	Class* cls = program->GetClass(type);
+	functionID = cls->GetFunctionID(cls->GetName(), argExprs);
+	return true;
+}
+
+void ASTExpressionDelete::EmitCode(Program* program)
+{
+	expr->EmitCode(program);
+	if (deleteArray)	program->WriteOPCode(OpCode::DELETE_ARRAY);
+	else				program->WriteOPCode(OpCode::DELETE);
+}
+
+TypeInfo ASTExpressionDelete::GetTypeInfo(Program* program)
+{
+	return TypeInfo(INVALID_ID, 0);
+}
+
+void ASTExpressionNewArray::EmitCode(Program* program)
+{
+	sizeExpr->EmitCode(program);
+	program->AddNewArrayCommand(type, pointerLevel);
+}
+
+TypeInfo ASTExpressionNewArray::GetTypeInfo(Program* program)
+{
+	return TypeInfo(type, pointerLevel + 1);
+}

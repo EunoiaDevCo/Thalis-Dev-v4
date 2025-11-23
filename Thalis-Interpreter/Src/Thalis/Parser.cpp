@@ -569,6 +569,25 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 				assignExpr = ParseExpression(tokenizer);
 				if (tokenizer->Expect(TokenTypeT::SEMICOLON)) return false;
 			}
+			else if (next.type == TokenTypeT::OPEN_BRACKET)
+			{
+				tokenizer->SetPeek(next);
+				std::vector<uint32> arrayDimensions;
+				ParseArrayDimensions(tokenizer, arrayDimensions);
+				Token peek = tokenizer->PeekToken();
+				std::vector<ASTExpression*> initializeExprs;
+				if (peek.type == TokenTypeT::EQUALS)
+				{
+					tokenizer->Expect(TokenTypeT::EQUALS);
+					ParseArrayInitializers(tokenizer, initializeExprs);
+				}
+
+				if (tokenizer->Expect(TokenTypeT::SEMICOLON, &peek)) COMPILE_ERROR(peek.line, peek.column, "Expected ';' in array declaration", false);
+
+				ASTExpressionStackArrayDeclare* declareArrayExpr = new ASTExpressionStackArrayDeclare(type, pointerLevel, slot, arrayDimensions, initializeExprs);
+				function->body.push_back(declareArrayExpr);
+				return true;
+			}
 			else
 			{
 				return false;
@@ -611,7 +630,8 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 		{
 			tokenizer->SetPeek(t);
 			ASTExpression* expr = ParseExpression(tokenizer);
-			expr->isStatement = true;
+			if(expr->setIsStatement)
+				expr->isStatement = true;
 			tokenizer->Expect(TokenTypeT::SEMICOLON);
 			function->body.push_back(expr);
 			return true;
@@ -843,6 +863,25 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 			return true;
 		}
 	}
+	else if (t.type == TokenTypeT::DELETE_T)
+	{
+		Token peek = tokenizer->PeekToken();
+		bool deleteArray = false;
+		if (peek.type == TokenTypeT::OPEN_BRACKET)
+		{
+			tokenizer->Expect(TokenTypeT::OPEN_BRACKET);
+			if (tokenizer->Expect(TokenTypeT::CLOSE_BRACKET, &peek)) COMPILE_ERROR(peek.line, peek.column, "Expected ']' in delete[]", false);
+			deleteArray = true;
+		}
+
+		ASTExpression* expr = ParseExpression(tokenizer);
+		Token semicolon;
+		if (tokenizer->Expect(TokenTypeT::SEMICOLON, &semicolon)) COMPILE_ERROR(semicolon.line, semicolon.column, "Expected ';' after delete expression", false);
+		
+		ASTExpressionDelete* deleteExpr = new ASTExpressionDelete(expr, deleteArray);
+		function->body.push_back(deleteExpr);
+		return true;
+	}
 	else if (t.type == TokenTypeT::UINT8)
 	{
 		declaringPrimitive = true;
@@ -912,7 +951,8 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 	{
 		tokenizer->SetPeek(t);
 		ASTExpression* expr = ParseExpression(tokenizer);
-		expr->isStatement = true;
+		if(expr->setIsStatement)
+			expr->isStatement = true;
 		tokenizer->Expect(TokenTypeT::SEMICOLON);
 		function->body.push_back(expr);
 		return true;
@@ -1301,9 +1341,46 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 		tokenizer->Expect(TokenTypeT::CLOSE_PAREN);
 		return expr;
 	}
+	else if (t.type == TokenTypeT::NEW)
+	{
+		Token typeToken;
+		if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &typeToken)) COMPILE_ERROR(typeToken.line, typeToken.column, "Expected identifier after 'new'", nullptr);
+		uint16 type = ParseType(typeToken);
+		uint8 pointerLevel = ParsePointerLevel(tokenizer);
+
+		Token peek = tokenizer->PeekToken();
+		if (peek.type == TokenTypeT::OPEN_BRACKET)
+		{
+			tokenizer->Expect(TokenTypeT::OPEN_BRACKET);
+			ASTExpression* sizeExpr = ParseExpression(tokenizer);
+			tokenizer->Expect(TokenTypeT::CLOSE_BRACKET);
+
+			ASTExpressionNewArray* newArrayExpr = new ASTExpressionNewArray(type, pointerLevel, sizeExpr);
+			return newArrayExpr;
+		}
+		else if (peek.type == TokenTypeT::OPEN_PAREN)
+		{
+			tokenizer->Expect(TokenTypeT::OPEN_PAREN);
+			std::vector<ASTExpression*> argExprs;
+			ParseArguments(tokenizer, argExprs);
+			ASTExpressionNew* newExpr = new ASTExpressionNew(type, argExprs);
+			return newExpr;
+		}
+		else
+		{
+			COMPILE_ERROR(peek.line, peek.column, "Expected '[' or '(' after identifer", nullptr);
+		}
+	}
 	else if (t.type == TokenTypeT::IDENTIFIER || t.type == TokenTypeT::THIS)
 	{
 		Token next = tokenizer->GetToken();
+
+		if (t.type == TokenTypeT::THIS && next.type != TokenTypeT::ARROW)
+		{
+			tokenizer->SetPeek(next);
+			ASTExpressionThis* thisExpr = new ASTExpressionThis(m_Program->GetClassID(m_CurrentClassName));
+			return thisExpr;
+		}
 
 		if (next.type == TokenTypeT::OPEN_PAREN) //Function call
 		{
@@ -1395,9 +1472,11 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 			std::string variableName(t.text, t.length);
 			uint16 slot = m_ScopeStack.back()->Resolve(variableName);
 			TypeInfo typeInfo = m_ScopeStack.back()->GetLocalTypeInfo(slot);
+
+			ASTExpression* expr = nullptr;
 			if (slot == INVALID_ID)
 			{
-
+				return nullptr;
 			}
 			else
 			{
@@ -1405,14 +1484,25 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 				ASTExpressionPushIndex* indexExpr = new ASTExpressionPushIndex(variableExpr, indexExprs);
 				if (assignExpr)
 				{
-					ASTExpressionSet* setExpr = new ASTExpressionSet(indexExpr, assignExpr);
-					return setExpr;
+					expr = new ASTExpressionSet(indexExpr, assignExpr);
 				}
 				else
 				{
-					return indexExpr;
+					expr = indexExpr;
 				}
 			}
+
+			peek = tokenizer->PeekToken();
+			if (peek.type == TokenTypeT::DOT || peek.type == TokenTypeT::ARROW)
+			{
+				std::vector<std::pair<std::string, bool>> members;
+				bool functionCall = false;
+				ParseMembers(tokenizer, members, &functionCall);
+				expr = ParseExpressionChain(tokenizer, expr, members, functionCall);
+				expr->setIsStatement = false;
+			}
+		
+			return expr;
 		}
 		else
 		{
@@ -1709,6 +1799,10 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 				ParseMembers(tokenizer, subMembers, &subFunctionCall);
 				chainExpr = ParseExpressionChain(tokenizer, chainExpr, subMembers, subFunctionCall);
 			}
+		}
+		else
+		{
+			chainExpr->isStatement = true;
 		}
 	}
 	else if (peek.type == TokenTypeT::DOT)

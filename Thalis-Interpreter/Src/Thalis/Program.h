@@ -40,7 +40,9 @@ enum class OpCode
 	SET,
 
 	MODULE_CONSTANT, MEMBER_FUNCTION_CALL, CONSTRUCTOR_CALL,
-	MODULE_FUNCTION_CALL, STATIC_FUNCTION_CALL, RETURN,
+	MODULE_FUNCTION_CALL, STATIC_FUNCTION_CALL, RETURN, NEW, NEW_ARRAY,
+
+	DELETE, DELETE_ARRAY,
 
 	JUMP, JUMP_IF_FALSE,
 
@@ -124,8 +126,10 @@ public:
 	void AddConstructorCallCommand(uint16 type, uint16 functionID);
 
 	void AddUnaryUpdateCommand(uint8 op, bool pushToStack);
-
 	void AddAritmaticCommand(Operator op, uint16 functionID);
+
+	void AddNewCommand(uint16 type, uint16 functionID);
+	void AddNewArrayCommand(uint16 type, uint8 pointerLevel);
 
 	void WriteUInt64(uint64 value);
 	void WriteUInt32(uint32 value);

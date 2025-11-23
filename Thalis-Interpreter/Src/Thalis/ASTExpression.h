@@ -13,12 +13,13 @@ struct ASTExpression
 	void* operator new(std::size_t size);
 	void operator delete(void* ptr) noexcept;
 
-	ASTExpression() : isStatement(false) {}
+	ASTExpression() : isStatement(false), setIsStatement(true) {}
 	virtual void EmitCode(Program* program) = 0;
 	virtual TypeInfo GetTypeInfo(Program* program) = 0;
 	virtual bool Resolve(Program* program) { return true; }
 
 	bool isStatement;
+	bool setIsStatement;
 };
 
 struct ASTExpressionLiteral : public ASTExpression
@@ -397,9 +398,48 @@ struct ASTExpressionConstructorCall : public ASTExpression
 	uint16 functionID;
 
 	ASTExpressionConstructorCall(uint16 type, const std::vector<ASTExpression*> argExprs) :
-		type(type), argExprs(argExprs) { }
+		type(type), argExprs(argExprs), functionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+};
+
+struct ASTExpressionNew : public ASTExpression
+{
+	uint16 type;
+	std::vector<ASTExpression*> argExprs;
+	uint16 functionID;
+
+	ASTExpressionNew(uint16 type, const std::vector<ASTExpression*> argExprs) :
+		type(type), argExprs(argExprs), functionID(INVALID_ID) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual bool Resolve(Program* program) override;
+};
+
+struct ASTExpressionDelete : public ASTExpression
+{
+	ASTExpression* expr;
+	bool deleteArray;
+
+	ASTExpressionDelete(ASTExpression* expr, bool deleteArray) :
+		expr(expr), deleteArray(deleteArray) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+};
+
+struct ASTExpressionNewArray : public ASTExpression
+{
+	uint16 type;
+	uint8 pointerLevel;
+	ASTExpression* sizeExpr;
+
+	ASTExpressionNewArray(uint16 type, uint8 pointerLevel, ASTExpression* sizeExpr) :
+		type(type), pointerLevel(pointerLevel), sizeExpr(sizeExpr) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
 };
