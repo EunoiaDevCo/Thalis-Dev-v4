@@ -31,9 +31,11 @@
     <ClInclude Include="Src\Thalis\Parser.h" />
     <ClInclude Include="Src\Thalis\Program.h" />
     <ClInclude Include="Src\Thalis\Scope.h" />
+    <ClInclude Include="Src\Thalis\Template.h" />
     <ClInclude Include="Src\Thalis\Tokenizer.h" />
     <ClInclude Include="Src\Thalis\TypeInfo.h" />
     <ClInclude Include="Src\Thalis\Value.h" />
+    <ClInclude Include="Src\Thalis\VTable.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Src\Thalis\ASTExpression.cpp" />
@@ -48,8 +50,10 @@
     <ClCompile Include="Src\Thalis\Parser.cpp" />
     <ClCompile Include="Src\Thalis\Program.cpp" />
     <ClCompile Include="Src\Thalis\Scope.cpp" />
+    <ClCompile Include="Src\Thalis\Template.cpp" />
     <ClCompile Include="Src\Thalis\Tokenizer.cpp" />
     <ClCompile Include="Src\Thalis\Value.cpp" />
+    <ClCompile Include="Src\Thalis\VTable.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Main.tls" />

@@ -1,62 +1,35 @@
 Import IO;
 
-class Vec2
+class Application
 {
-	public Vec2(real32 x, real32 y)
+	public virtual void Func()
 	{
-		this->x = x;
-		this->y = y;
+		IO.Println("Application::Func()");
 	}
 
-	public Vec2(Vec2& other)
-	{
-		x = other.x * 2;
-		y = other.y * 2;
-	}
-
-	public ~Vec2()
-	{
-		IO.Println("Called ~Vec2()");
-	}
-
-	public void Set(real32 x, real32 y)
-	{
-		this->x = x;
-		this->y = y;
-	}
-
-	public Vec2* Print()
-	{
-		IO.Print("(");
-		IO.Print(x);
-		IO.Print(", ");
-		IO.Print(y);
-		IO.Println(")");
-		return this;
-	}
-
-	public void operator=(Vec2& other)
-	{
-		x = other.x * 2.0;
-		y = other.y * 2.0;
-	}
-
-	public real32 x;
-	public real32 y;
+	uint32 v1;
 };
 
+class Game -> inherit[Application]
+{
+	public virtual void Func()
+	{
+		IO.Println("Game::Func()");
+	}
+
+	uint32 v2;
+};
 
 class Main
 {
 	public static void Main()
 	{
-		Vec2** array = new Vec2*[100];
+		Application* app = new Game();
+		app->v1 = 10;
+		app->v2 = 20;
 
-		Vec2 v(10.0, 10.0);
-		array[1] = &v;
+		app->Func();
 
-		array[1]->Print()->Print();
-
-		delete[] array;
+		delete app;
 	}
 };

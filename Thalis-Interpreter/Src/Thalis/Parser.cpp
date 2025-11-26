@@ -6,6 +6,7 @@
 #include <iostream>
 #include "Modules/IOModule.h"
 #include "Modules/ModuleID.h"
+#include <unordered_set>
 
 #define COMPILE_ERROR(Line, Column, Msg, Ret) { std::cout << Line << "(" << Column << ") " << Msg << std::endl; return Ret; } 
 
@@ -50,6 +51,7 @@ void Parser::Parse(const std::string& path)
 		token = tokenizer.GetToken();
 	}
 
+	m_Program->BuildVTables();
 	m_Program->Resolve();
 	m_Program->EmitCode();
 
@@ -110,14 +112,74 @@ bool Parser::ParseClass(Tokenizer* tokenizer)
 	Token nameToken;
 	if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &nameToken)) COMPILE_ERROR(nameToken.line, nameToken.column, "Expected identifier after class", false);
 	std::string className(nameToken.text, nameToken.length);
-
 	m_CurrentClassName = className;
+
+	TemplateDefinition templateDefinition;
+	Token arrowToken = tokenizer->PeekToken();
+	Class* baseClass = nullptr;
+	while (arrowToken.type == TokenTypeT::ARROW)
+	{
+		tokenizer->Expect(TokenTypeT::ARROW);
+		Token classExtensionToken = tokenizer->GetToken();
+		if (classExtensionToken.type == TokenTypeT::TEMPLATE)
+		{
+			if (tokenizer->Expect(TokenTypeT::OPEN_BRACKET)) return false;
+			while (true)
+			{
+				TemplateParameter param;
+				Token templateTypeToken = tokenizer->GetToken();
+				if (templateTypeToken.type == TokenTypeT::CLASS)
+				{
+					Token templateTypeNameToken;
+					if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &templateTypeNameToken)) return false;
+
+					std::string templateTypeName(templateTypeNameToken.text, templateTypeNameToken.length);
+					param.type = TemplateParameterType::TYPE;
+					param.name = templateTypeName;
+				}
+				else if (templateTypeToken.type == TokenTypeT::UINT32)
+				{
+					Token templateIntNameToken;
+					if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &templateIntNameToken)) return false;
+
+					std::string templateIntName(templateIntNameToken.text, templateIntNameToken.length);
+					param.type = TemplateParameterType::INT;
+					param.name = templateIntName;
+				}
+				else
+				{
+					return false;
+				}
+
+				templateDefinition.parameters.push_back(param);
+
+				Token commaToken = tokenizer->GetToken();
+				if (commaToken.type == TokenTypeT::CLOSE_BRACKET)
+					break;
+			}
+		}
+		else if (classExtensionToken.type == TokenTypeT::INHERIT)
+		{
+			if (tokenizer->Expect(TokenTypeT::OPEN_BRACKET)) return false;
+			Token inheritToken;
+			if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &inheritToken)) return false;
+			std::string inheritClassName(inheritToken.text, inheritToken.length);
+
+			baseClass = m_Program->GetClass(m_Program->GetClassID(inheritClassName));
+
+			Token closeBracket = tokenizer->GetToken();
+			if (closeBracket.type != TokenTypeT::CLOSE_BRACKET) return false;
+		}
+
+		arrowToken = tokenizer->PeekToken();
+	}
 
 	Token openBrace;
 	if (tokenizer->Expect(TokenTypeT::OPEN_BRACE, &openBrace)) COMPILE_ERROR(nameToken.line, nameToken.column, "Expected '{' after class name", false);
 
-	Class* cls = new Class(className);
+	Class* cls = new Class(className, baseClass);
 	uint16 id = m_Program->AddClass(cls);
+	cls->SetTemplateDefinition(templateDefinition);
 	//------------------------------------------------------------
 	// Pass 1: Parse all class variables (fields + static)
 	//------------------------------------------------------------
@@ -174,6 +236,8 @@ bool Parser::ParseClass(Tokenizer* tokenizer)
 	{
 		cls->AddFunction(GenerateDefaultCopyFunction(cls, className));
 	}
+
+	return true;
 }
 
 static AccessModifier ParseAccessModifier(Tokenizer* tokenizer)
@@ -295,6 +359,11 @@ bool Parser::ParseFunction(Tokenizer* tokenizer, Class* cls)
 			else if (t.type == TokenTypeT::GREATER) function->name = "operator>";
 			else if (t.type == TokenTypeT::LESS_EQUALS) function->name = "operator<=";
 			else if (t.type == TokenTypeT::GREATER_EQUALS) function->name = "operator>=";
+			else if (t.type == TokenTypeT::OPEN_BRACKET)
+			{
+				if (tokenizer->Expect(TokenTypeT::CLOSE_BRACKET, &t)) COMPILE_ERROR(t.line, t.column, "Expected ']' in operator[] function", false);
+				function->name = "operator[]";
+			}
 		}
 		else if (t.type == TokenTypeT::IDENTIFIER)
 		{
@@ -324,20 +393,71 @@ bool Parser::ParseFunction(Tokenizer* tokenizer, Class* cls)
 	{
 		FunctionParameter param;
 		param.type.pointerLevel = 0;
+		param.instantiationCommand = nullptr;
 
 		Token typeToken = tokenizer->GetToken();
+		std::string typeName(typeToken.text, typeToken.length);
 		if (typeToken.type == TokenTypeT::CLOSE_PAREN)
 			break;
 
 		param.type.type = ParseType(typeToken);
 		param.type.pointerLevel = ParsePointerLevel(tokenizer);
+		param.type.derivedType = param.type.type;
 
+		std::string templateTypeName = "";
+		if (param.type.type == INVALID_ID) //Check for template type
+		{
+			const TemplateDefinition& definition = cls->GetTemplateDefinition();
+			for (uint32 i = 0; i < definition.parameters.size(); i++)
+			{
+				if (definition.parameters[i].name == typeName)
+				{
+					templateTypeName = typeName;
+					param.type.type = (uint16)ValueType::TEMPLATE_TYPE;
+					break;
+				}
+			}
+
+			if (templateTypeName.empty())
+			{
+				COMPILE_ERROR(typeToken.length, typeToken.column, "Unresolved function parameter type", false);
+			}
+		}
+
+		param.templateTypeName = templateTypeName;
 		param.isReference = false;
 		Token peek = tokenizer->PeekToken();
+		TemplateInstantiationCommand* command = nullptr;
 		if (peek.type == TokenTypeT::AND)
 		{
 			tokenizer->Expect(TokenTypeT::AND);
 			param.isReference = true;
+		}
+		else if (peek.type == TokenTypeT::LESS)
+		{
+			tokenizer->Expect(TokenTypeT::LESS);
+			command = new TemplateInstantiationCommand();
+			bool templatedType = false;
+			TemplateInstantiation instantiation = ParseTemplateInstantiation(tokenizer, cls, command, &templatedType);
+			command->type = m_Program->GetClassID(typeName);
+
+			if (templatedType)
+			{
+				param.instantiationCommand = command;
+			}
+			else
+			{
+				delete command;
+				command = nullptr;
+				param.type.type = cls->InstantiateTemplate(m_Program, instantiation);
+			}
+
+			peek = tokenizer->PeekToken();
+			if (peek.type == TokenTypeT::AND)
+			{
+				tokenizer->Expect(TokenTypeT::AND);
+				param.isReference = true;
+			}
 		}
 
 		t = tokenizer->GetToken();
@@ -348,7 +468,7 @@ bool Parser::ParseFunction(Tokenizer* tokenizer, Class* cls)
 		}
 
 		std::string paramName(t.text, t.length);
-		param.variableID = functionScope->AddLocal(paramName, param.type);
+		param.variableID = functionScope->AddLocal(paramName, param.type, templateTypeName, command);
 
 		function->parameters.push_back(param);
 
@@ -405,8 +525,48 @@ bool Parser::ParseClassVariable(Tokenizer* tokenizer, Class* cls, uint64* member
 	Token typeToken = tokenizer->GetToken();
 	std::string typeName(typeToken.text, typeToken.length);
 	uint16 type = ParseType(typeToken);
+	std::string templateTypeName = "";
+	if (type == INVALID_ID)
+	{
+		bool foundTemplateType = false;
+		const TemplateDefinition& definition = cls->GetTemplateDefinition();
+		for (uint32 i = 0; i < definition.parameters.size(); i++)
+		{
+			if (definition.parameters[i].type == TemplateParameterType::TYPE &&
+				definition.parameters[i].name == typeName)
+			{
+				templateTypeName = typeName;
+				foundTemplateType = true;
+				break;
+			}
+		}
 
-	if (type == INVALID_ID) return false;
+		if (!foundTemplateType) return false;
+		type = (uint16)ValueType::TEMPLATE_TYPE;
+	}
+
+	Token openAngle = tokenizer->PeekToken();
+	TemplateInstantiationCommand* command = nullptr;
+	if (openAngle.type == TokenTypeT::LESS)
+	{
+		tokenizer->Expect(TokenTypeT::LESS);
+		bool templatedType = false;
+		command = new TemplateInstantiationCommand();
+		TemplateInstantiation instantiation = ParseTemplateInstantiation(tokenizer, m_Program->GetClass(type), command, &templatedType);
+		command->type = m_Program->GetClassID(typeName);
+
+		if (!templatedType)
+		{
+			Class* baseClass = m_Program->GetClass(type);
+			type = baseClass->InstantiateTemplate(m_Program, instantiation);
+			delete command;
+			command = nullptr;
+		}
+		else
+		{
+			type = (uint16)ValueType::TEMPLATE_TYPE;
+		}
+	}
 
 	uint64 typeSize = m_Program->GetTypeSize(type);
 	uint8 pointerLevel = ParsePointerLevel(tokenizer);
@@ -416,13 +576,13 @@ bool Parser::ParseClassVariable(Tokenizer* tokenizer, Class* cls, uint64* member
 	if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &nameToken)) return false;
 	std::string name(nameToken.text, nameToken.length);
 
-	std::vector<uint32> arrayDimensions;
+	std::vector<std::pair<uint32, std::string>> arrayDimensions;
 	Token openBracket = tokenizer->PeekToken();
 	if (openBracket.type == TokenTypeT::OPEN_BRACKET)
 	{
 		ParseArrayDimensions(tokenizer, arrayDimensions);
 		for (uint32 i = 0; i < arrayDimensions.size(); i++)
-			typeSize *= arrayDimensions[i];
+			typeSize *= arrayDimensions[i].first;
 
 		typeSize += sizeof(ArrayHeader);
 	}
@@ -444,7 +604,7 @@ bool Parser::ParseClassVariable(Tokenizer* tokenizer, Class* cls, uint64* member
 		if (!arrayDimensions.empty())
 			finalOffset += sizeof(ArrayHeader);
 
-		cls->AddStaticField(name, type, pointerLevel, finalOffset, typeSize, arrayDimensions.data(), arrayDimensions.size(), initializeExpr);
+		cls->AddStaticField(name, type, pointerLevel, finalOffset, typeSize, arrayDimensions, initializeExpr);
 		*staticOffset += typeSize;
 	}
 	else
@@ -453,7 +613,7 @@ bool Parser::ParseClassVariable(Tokenizer* tokenizer, Class* cls, uint64* member
 		if (!arrayDimensions.empty())
 			finalOffset += sizeof(ArrayHeader);
 
-		cls->AddMemberField(name, type, pointerLevel, finalOffset, typeSize, arrayDimensions.data(), arrayDimensions.size());
+		cls->AddMemberField(name, type, pointerLevel, finalOffset, typeSize, arrayDimensions, templateTypeName, command);
 		*memberOffset += typeSize;
 	}
 
@@ -513,14 +673,30 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 		if (next.type == TokenTypeT::IDENTIFIER) //Declaring user defined type
 		{
 			uint16 type = m_Program->GetClassID(identifier);
+			std::string templateTypeName = "";
+			if (type == INVALID_ID) //Check for template type
+			{
+				Class* cls = m_Program->GetClass(m_Program->GetClassID(m_CurrentClassName));
+				const TemplateDefinition& definition = cls->GetTemplateDefinition();
+				for (uint32 i = 0; i < definition.parameters.size(); i++)
+				{
+					if (definition.parameters[i].name == identifier)
+					{
+						templateTypeName = identifier;
+						type = (uint16)ValueType::TEMPLATE_TYPE;
+						break;
+					}
+				}
+			}
+
 			std::string name(next.text, next.length);
-			uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, 0));
+			uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, 0), templateTypeName);
 
 			next = tokenizer->GetToken();
 			if (next.type == TokenTypeT::SEMICOLON)
 			{
 				std::vector<ASTExpression*> argExprs(0);
-				ASTExpressionDeclareObjectWithConstructor* declareObjectExpr = new ASTExpressionDeclareObjectWithConstructor(type, argExprs, slot);
+				ASTExpressionDeclareObjectWithConstructor* declareObjectExpr = new ASTExpressionDeclareObjectWithConstructor(type, argExprs, slot, templateTypeName);
 				function->body.push_back(declareObjectExpr);
 				return true;
 			}
@@ -529,7 +705,7 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 				std::vector<ASTExpression*> argExprs;
 				ParseArguments(tokenizer, argExprs);
 				if (tokenizer->Expect(TokenTypeT::SEMICOLON)) return false;
-				ASTExpressionDeclareObjectWithConstructor* declareObjectExpr = new ASTExpressionDeclareObjectWithConstructor(type, argExprs, slot);
+				ASTExpressionDeclareObjectWithConstructor* declareObjectExpr = new ASTExpressionDeclareObjectWithConstructor(type, argExprs, slot, templateTypeName);
 				function->body.push_back(declareObjectExpr);
 				return true;
 			}
@@ -537,7 +713,7 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 			{
 				ASTExpression* assignExpr = ParseExpression(tokenizer);
 				if (tokenizer->Expect(TokenTypeT::SEMICOLON)) return false;
-				ASTExpressionDeclareObjectWithAssign* declareObjectExpr = new ASTExpressionDeclareObjectWithAssign(type, slot, assignExpr);
+				ASTExpressionDeclareObjectWithAssign* declareObjectExpr = new ASTExpressionDeclareObjectWithAssign(type, slot, assignExpr, templateTypeName);
 				function->body.push_back(declareObjectExpr);
 				return true;
 			}
@@ -553,26 +729,54 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 				isReference = true;
 			}
 			uint16 type = m_Program->GetClassID(identifier);
+
+			std::string templateTypeName = "";
+			if (type == INVALID_ID)
+			{
+				Class* cls = m_Program->GetClass(m_Program->GetClassID(m_CurrentClassName));
+				const TemplateDefinition& definition = cls->GetTemplateDefinition();
+				for (uint32 i = 0; i < definition.parameters.size(); i++)
+				{
+					if (definition.parameters[i].name == identifier)
+					{
+						templateTypeName = identifier;
+						type = (uint16)ValueType::TEMPLATE_TYPE;
+						break;
+					}
+				}
+			}
+			
+
 			Token nameToken;
 			if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &nameToken))return false;
 			std::string name(nameToken.text, nameToken.length);
-			uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, pointerLevel));
+			uint16 slot;
 
 			next = tokenizer->GetToken();
 			ASTExpression* assignExpr = nullptr;
 			if (next.type == TokenTypeT::SEMICOLON)
 			{
+				slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, pointerLevel), templateTypeName);
 				assignExpr = nullptr;
 			}
 			else if (next.type == TokenTypeT::EQUALS)
 			{
 				assignExpr = ParseExpression(tokenizer);
 				if (tokenizer->Expect(TokenTypeT::SEMICOLON)) return false;
+
+				uint16 derivedType = type;
+				if (assignExpr && pointerLevel == 1)
+				{
+					derivedType = assignExpr->GetTypeInfo(m_Program).type;
+				}
+
+				slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, pointerLevel, derivedType), templateTypeName, nullptr);
 			}
 			else if (next.type == TokenTypeT::OPEN_BRACKET)
 			{
+				slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, pointerLevel), templateTypeName);
 				tokenizer->SetPeek(next);
-				std::vector<uint32> arrayDimensions;
+				std::vector<std::pair<uint32, std::string>> arrayDimensions;
 				ParseArrayDimensions(tokenizer, arrayDimensions);
 				Token peek = tokenizer->PeekToken();
 				std::vector<ASTExpression*> initializeExprs;
@@ -584,7 +788,7 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 
 				if (tokenizer->Expect(TokenTypeT::SEMICOLON, &peek)) COMPILE_ERROR(peek.line, peek.column, "Expected ';' in array declaration", false);
 
-				ASTExpressionStackArrayDeclare* declareArrayExpr = new ASTExpressionStackArrayDeclare(type, pointerLevel, slot, arrayDimensions, initializeExprs);
+				ASTExpressionStackArrayDeclare* declareArrayExpr = new ASTExpressionStackArrayDeclare(type, pointerLevel, slot, arrayDimensions, initializeExprs, templateTypeName);
 				function->body.push_back(declareArrayExpr);
 				return true;
 			}
@@ -596,13 +800,13 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 			if (isReference)
 			{
 				if (assignExpr == nullptr) COMPILE_ERROR(next.line, next.column, "Declared reference requires an assign value", false);
-				ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference(type, pointerLevel, assignExpr, slot);
+				ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference(type, pointerLevel, assignExpr, slot, templateTypeName);
 				function->body.push_back(declareReferenceExpr);
 				return true;
 			}
 			else
 			{
-				ASTExpressionDeclarePointer* declarePointerExpr = new ASTExpressionDeclarePointer(type, pointerLevel, slot, assignExpr);
+				ASTExpressionDeclarePointer* declarePointerExpr = new ASTExpressionDeclarePointer(type, pointerLevel, slot, assignExpr, templateTypeName);
 				function->body.push_back(declarePointerExpr);
 				return true;
 			}
@@ -610,10 +814,26 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 		else if (next.type == TokenTypeT::AND)
 		{
 			uint16 type = m_Program->GetClassID(identifier);
+
+			std::string templateTypeName;
+			if (type == INVALID_ID)
+			{
+				Class* cls = m_Program->GetClass(m_Program->GetClassID(m_CurrentClassName));
+				const TemplateDefinition& definition = cls->GetTemplateDefinition();
+				for (uint32 i = 0; i < definition.parameters.size(); i++)
+				{
+					if (definition.parameters[i].name == identifier)
+					{
+						templateTypeName = identifier;
+						break;
+					}
+				}
+			}
+
 			Token nameToken;
 			if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &nameToken))return false;
 			std::string name(nameToken.text, nameToken.length);
-			uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, 0));
+			uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo(type, 0), templateTypeName);
 
 			Token equalsToken;
 			if (tokenizer->Expect(TokenTypeT::EQUALS, &equalsToken)) COMPILE_ERROR(equalsToken.line, equalsToken.column, "Expected '=' in reference declaration", false);
@@ -622,9 +842,93 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 			Token semicolon;
 			if (tokenizer->Expect(TokenTypeT::SEMICOLON, &semicolon)) COMPILE_ERROR(semicolon.line, semicolon.column, "Expected ';' after reference declaration", false);
 
-			ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference(type, 0, assignExpr, slot);
+			ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference(type, 0, assignExpr, slot, templateTypeName);
 			function->body.push_back(declareReferenceExpr);
 			return true;
+		}
+		else if (next.type == TokenTypeT::LESS)
+		{
+			TemplateInstantiationCommand* command = new TemplateInstantiationCommand();
+			bool templatedType = false;
+			TemplateInstantiation instantiation = ParseTemplateInstantiation(tokenizer, m_Program->GetClass(m_Program->GetClassID(identifier)), command, &templatedType);
+			command->type = m_Program->GetClassID(identifier);
+			uint16 classID = INVALID_ID;
+			if (!templatedType)
+			{
+				uint16 baseClassID = m_Program->GetClassID(identifier);
+				Class* baseClass = m_Program->GetClass(baseClassID);
+				classID = baseClass->InstantiateTemplate(m_Program, instantiation);
+				delete command;
+				command = nullptr;
+			}
+			else
+			{
+				classID = (uint16)ValueType::TEMPLATE_TYPE;
+			}
+			
+			uint8 pointerLevel = ParsePointerLevel(tokenizer);
+
+			bool isReference = false;
+			Token peek = tokenizer->PeekToken();
+			if (peek.type == TokenTypeT::AND)
+			{
+				isReference = true;
+				tokenizer->Expect(TokenTypeT::AND);
+			}
+
+			Token nameTok = tokenizer->GetToken();
+			std::string varName(nameTok.text, nameTok.length);
+
+			Token openParen = tokenizer->PeekToken();
+			std::vector<ASTExpression*> argExprs;
+			ASTExpression* assignExpr = nullptr;
+			if (openParen.type == TokenTypeT::OPEN_PAREN)
+			{
+				tokenizer->Expect(TokenTypeT::OPEN_PAREN);
+				ParseArguments(tokenizer, argExprs);
+			}
+			else if (openParen.type == TokenTypeT::EQUALS)
+			{
+				tokenizer->Expect(TokenTypeT::EQUALS);
+				assignExpr = ParseExpression(tokenizer);
+			}
+
+			if (tokenizer->Expect(TokenTypeT::SEMICOLON)) return false;
+
+			uint16 derivedType = classID;
+			if (assignExpr && pointerLevel == 1)
+			{
+				derivedType = assignExpr->GetTypeInfo(m_Program).type;
+			}
+
+			uint16 slot = m_ScopeStack.back()->AddLocal(varName, TypeInfo(classID, 0, derivedType), "", command);
+
+			if (isReference)
+			{
+				ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference(classID, pointerLevel, assignExpr, slot, "", command);
+				function->body.push_back(declareReferenceExpr);
+				return true;
+			}
+
+			if (pointerLevel > 0)
+			{
+				ASTExpressionDeclarePointer* declarePointerExpr = new ASTExpressionDeclarePointer(classID, pointerLevel, slot, assignExpr, "", command);
+				function->body.push_back(declarePointerExpr);
+				return true;
+			}
+
+			if (assignExpr != nullptr)
+			{
+				ASTExpressionDeclareObjectWithAssign* declareObjExpr = new ASTExpressionDeclareObjectWithAssign(classID, slot, assignExpr, "", command);
+				function->body.push_back(declareObjExpr);
+				return true;
+			}
+			else
+			{
+				ASTExpressionDeclareObjectWithConstructor* declareObjExpr = new ASTExpressionDeclareObjectWithConstructor(classID, argExprs, slot, "", command);
+				function->body.push_back(declareObjExpr);
+				return true;
+			}
 		}
 		else
 		{
@@ -973,10 +1277,10 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 		if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &nameToken)) return false;
 		std::string name(nameToken.text, nameToken.length);
 
-		std::vector<uint32> dimensions;
+		std::vector<std::pair<uint32, std::string>> dimensions;
 		ParseArrayDimensions(tokenizer, dimensions);
 
-		uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo((uint16)primitiveType, pointerLevel));
+		uint16 slot = m_ScopeStack.back()->AddLocal(name, TypeInfo((uint16)primitiveType, pointerLevel), "");
 
 		if (!dimensions.empty())
 		{
@@ -996,7 +1300,7 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 			Token semicolon;
 			if (tokenizer->Expect(TokenTypeT::SEMICOLON, &semicolon)) COMPILE_ERROR(semicolon.line, semicolon.column, "Expected ';' after array declaration", nullptr);
 
-			ASTExpressionStackArrayDeclare* arrayDeclare = new ASTExpressionStackArrayDeclare((uint16)primitiveType, pointerLevel, slot, dimensions, initializeExprs);
+			ASTExpressionStackArrayDeclare* arrayDeclare = new ASTExpressionStackArrayDeclare((uint16)primitiveType, pointerLevel, slot, dimensions, initializeExprs, "");
 			function->body.push_back(arrayDeclare);
 			return true;
 		}
@@ -1020,13 +1324,13 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 
 		if (isReference)
 		{
-			ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference((uint16)primitiveType, pointerLevel, assignExpr, slot);
+			ASTExpressionDeclareReference* declareReferenceExpr = new ASTExpressionDeclareReference((uint16)primitiveType, pointerLevel, assignExpr, slot, "");
 			function->body.push_back(declareReferenceExpr);
 			return true;
 		}
 		else if (pointerLevel > 0)
 		{
-			ASTExpressionDeclarePointer* declarePointerExpr = new ASTExpressionDeclarePointer((uint16)primitiveType, pointerLevel, slot, assignExpr);
+			ASTExpressionDeclarePointer* declarePointerExpr = new ASTExpressionDeclarePointer((uint16)primitiveType, pointerLevel, slot, assignExpr, "");
 			function->body.push_back(declarePointerExpr);
 			return true;
 		}
@@ -1343,10 +1647,26 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 	}
 	else if (t.type == TokenTypeT::NEW)
 	{
-		Token typeToken;
-		if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &typeToken)) COMPILE_ERROR(typeToken.line, typeToken.column, "Expected identifier after 'new'", nullptr);
+		Token typeToken = tokenizer->GetToken();
+		if (typeToken.type != TokenTypeT::IDENTIFIER && !Tokenizer::IsTokenPrimitiveType(typeToken)) COMPILE_ERROR(typeToken.line, typeToken.column, "Expected identifier or primitive type after 'new'", nullptr);
 		uint16 type = ParseType(typeToken);
 		uint8 pointerLevel = ParsePointerLevel(tokenizer);
+
+		std::string templateTypeName = "";
+		if (type == INVALID_ID)
+		{
+			std::string typeName(typeToken.text, typeToken.length);
+			Class* cls = m_Program->GetClass(m_Program->GetClassID(m_CurrentClassName));
+			const TemplateDefinition& definition = cls->GetTemplateDefinition();
+			for (uint32 i = 0; i < definition.parameters.size(); i++)
+			{
+				if (definition.parameters[i].name == typeName)
+				{
+					templateTypeName = typeName;
+					break;
+				}
+			}
+		}
 
 		Token peek = tokenizer->PeekToken();
 		if (peek.type == TokenTypeT::OPEN_BRACKET)
@@ -1355,7 +1675,7 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 			ASTExpression* sizeExpr = ParseExpression(tokenizer);
 			tokenizer->Expect(TokenTypeT::CLOSE_BRACKET);
 
-			ASTExpressionNewArray* newArrayExpr = new ASTExpressionNewArray(type, pointerLevel, sizeExpr);
+			ASTExpressionNewArray* newArrayExpr = new ASTExpressionNewArray(type, pointerLevel, sizeExpr, templateTypeName);
 			return newArrayExpr;
 		}
 		else if (peek.type == TokenTypeT::OPEN_PAREN)
@@ -1363,7 +1683,7 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 			tokenizer->Expect(TokenTypeT::OPEN_PAREN);
 			std::vector<ASTExpression*> argExprs;
 			ParseArguments(tokenizer, argExprs);
-			ASTExpressionNew* newExpr = new ASTExpressionNew(type, argExprs);
+			ASTExpressionNew* newExpr = new ASTExpressionNew(type, argExprs, templateTypeName);
 			return newExpr;
 		}
 		else
@@ -1389,10 +1709,21 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 
 			std::string functionName(t.text, t.length);
 			uint16 classID = m_Program->GetClassID(m_CurrentClassName);
+			Class* cls = m_Program->GetClass(classID);
+			const TemplateDefinition& definition = cls->GetTemplateDefinition();
+			for (uint32 i = 0; i < definition.parameters.size(); i++)
+			{
+				if (functionName == definition.parameters[i].name)
+				{
+					ASTExpressionConstructorCall* constructorCallExpr = new ASTExpressionConstructorCall((uint16)ValueType::TEMPLATE_TYPE, argExprs, functionName);
+					return constructorCallExpr;
+				}
+			}
+
 			Class* constructorClass = m_Program->GetClassByName(functionName);
 			if (constructorClass)
 			{
-				ASTExpressionConstructorCall* constructorCallExpr = new ASTExpressionConstructorCall(m_Program->GetClassID(functionName), argExprs);
+				ASTExpressionConstructorCall* constructorCallExpr = new ASTExpressionConstructorCall(m_Program->GetClassID(functionName), argExprs, "");
 				return constructorCallExpr;
 			}
 
@@ -1450,8 +1781,9 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 			}
 			else
 			{
-				TypeInfo typeInfo = m_ScopeStack.back()->GetLocalTypeInfo(slot);
-				ASTExpressionPushLocal* localExpr = new ASTExpressionPushLocal(slot, typeInfo);
+				ScopeLocalDeclaration declaration = m_ScopeStack.back()->GetDeclarationInfo(slot);;
+				
+				ASTExpressionPushLocal* localExpr = new ASTExpressionPushLocal(slot, declaration.type, declaration.templateTypeName, declaration.command);
 				ASTExpressionSet* setExpr = new ASTExpressionSet(localExpr, assignExpr);
 				return setExpr;
 			}
@@ -1471,16 +1803,32 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 
 			std::string variableName(t.text, t.length);
 			uint16 slot = m_ScopeStack.back()->Resolve(variableName);
-			TypeInfo typeInfo = m_ScopeStack.back()->GetLocalTypeInfo(slot);
+			ScopeLocalDeclaration declaration = m_ScopeStack.back()->GetDeclarationInfo(slot);
 
 			ASTExpression* expr = nullptr;
 			if (slot == INVALID_ID)
 			{
-				return nullptr;
+				uint16 classID = m_Program->GetClassID(m_CurrentClassName);
+				Class* cls = m_Program->GetClass(classID);
+				std::vector<std::string> members;
+				members.push_back(variableName);
+				TypeInfo typeInfo;
+				bool isArray = false;
+				uint64 offset = cls->CalculateMemberOffset(m_Program, members, &typeInfo, &isArray);
+				ASTExpressionPushMember* pushMemberExpr = new ASTExpressionPushMember(new ASTExpressionDereference(new ASTExpressionThis(classID)), members);
+				ASTExpressionPushIndex* indexExpr = new ASTExpressionPushIndex(pushMemberExpr, indexExprs);
+				if (assignExpr)
+				{
+					expr = new ASTExpressionSet(indexExpr, assignExpr);
+				}
+				else
+				{
+					expr = indexExpr;
+				}
 			}
 			else
 			{
-				ASTExpressionPushLocal* variableExpr = new ASTExpressionPushLocal(slot, typeInfo);
+				ASTExpressionPushLocal* variableExpr = new ASTExpressionPushLocal(slot, declaration.type, declaration.templateTypeName, declaration.command);
 				ASTExpressionPushIndex* indexExpr = new ASTExpressionPushIndex(variableExpr, indexExprs);
 				if (assignExpr)
 				{
@@ -1504,12 +1852,83 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 		
 			return expr;
 		}
+		else if (next.type == TokenTypeT::LESS)
+		{
+			std::string baseTypeName(t.text, t.length);
+
+			uint64 classID = m_Program->GetClassID(baseTypeName);
+			if (classID == INVALID_ID)
+			{
+				std::string variableName(t.text, t.length);
+				Scope* scope = m_ScopeStack.back();
+				uint16 slot = m_ScopeStack.back()->Resolve(variableName);
+				ScopeLocalDeclaration declaration = m_ScopeStack.back()->GetDeclarationInfo(slot);
+				tokenizer->SetPeek(next);
+				if (slot == INVALID_ID)
+				{
+					std::vector<std::string> members;
+					members.push_back(variableName);
+					uint16 thisClassID = m_Program->GetClassID(m_CurrentClassName);
+					Class* cls = m_Program->GetClass(thisClassID);
+					TypeInfo staticTypeInfo;
+					bool isArray = false;
+					uint64 staticOffset = cls->CalculateStaticOffset(m_Program, members, &staticTypeInfo, &isArray);
+					if (staticOffset == UINT64_MAX)
+					{
+						ASTExpressionThis* thisExpr = new ASTExpressionThis(thisClassID);
+						ASTExpressionDereference* dereferenceThisExpr = new ASTExpressionDereference(thisExpr);
+						ASTExpressionPushMember* pushMemberExpr = new ASTExpressionPushMember(dereferenceThisExpr, members);
+						return pushMemberExpr;
+					}
+					else
+					{
+						ASTExpressionStaticVariable* staticVariableExpr = new ASTExpressionStaticVariable(thisClassID, staticOffset, staticTypeInfo, isArray);
+						return staticVariableExpr;
+					}
+				}
+				else
+				{
+					ASTExpressionPushLocal* localExpr = new ASTExpressionPushLocal(slot, declaration.type, declaration.templateTypeName, declaration.command);
+					return localExpr;
+				}
+			}
+
+			TemplateInstantiationCommand* command = new TemplateInstantiationCommand();
+			bool templatedType = false;
+			Class* cls = m_Program->GetClass(m_Program->GetClassID(baseTypeName));
+
+			TemplateInstantiation instantiation = ParseTemplateInstantiation(tokenizer, cls, command, &templatedType);
+			command->type = classID;
+
+			if (!templatedType)
+			{
+				delete command;
+				command = nullptr;
+			}
+
+			if (tokenizer->Expect(TokenTypeT::OPEN_PAREN)) return false;
+			std::vector<ASTExpression*> argExprs;
+			ParseArguments(tokenizer, argExprs);
+
+			uint16 type = INVALID_ID;
+			if (!templatedType)
+			{
+				type = cls->InstantiateTemplate(m_Program, instantiation);
+			}
+			else
+			{
+				type = (uint16)ValueType::TEMPLATE_TYPE;
+			}
+
+			ASTExpressionConstructorCall* constructorCallExpr = new ASTExpressionConstructorCall(type, argExprs, "", command);
+			return constructorCallExpr;
+		}
 		else
 		{
 			std::string variableName(t.text, t.length);
 			Scope* scope = m_ScopeStack.back();
 			uint16 slot = m_ScopeStack.back()->Resolve(variableName);
-			TypeInfo typeInfo = m_ScopeStack.back()->GetLocalTypeInfo(slot);
+			ScopeLocalDeclaration declaration = m_ScopeStack.back()->GetDeclarationInfo(slot);
 			tokenizer->SetPeek(next);
 			if (slot == INVALID_ID)
 			{
@@ -1535,7 +1954,7 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 			}
 			else
 			{
-				ASTExpressionPushLocal* localExpr = new ASTExpressionPushLocal(slot, typeInfo);
+				ASTExpressionPushLocal* localExpr = new ASTExpressionPushLocal(slot, declaration.type, declaration.templateTypeName, declaration.command);
 				return localExpr;
 			}
 		}
@@ -1561,16 +1980,23 @@ void Parser::ParseArguments(Tokenizer* tokenizer, std::vector<ASTExpression*>& a
 	}
 }
 
-void Parser::ParseArrayDimensions(Tokenizer* tokenizer, std::vector<uint32>& dimensions)
+void Parser::ParseArrayDimensions(Tokenizer* tokenizer, std::vector<std::pair<uint32, std::string>>& dimensions)
 {
 	Token openBracket = tokenizer->PeekToken();
 	while (openBracket.type == TokenTypeT::OPEN_BRACKET)
 	{
 		tokenizer->Expect(TokenTypeT::OPEN_BRACKET);
-		Token numberLiteral;
-		if (tokenizer->Expect(TokenTypeT::NUMBER_LITERAL, &numberLiteral)) COMPILE_ERROR(numberLiteral.line, numberLiteral.column, "Expected integer literal for array dimension");
-		uint32 dimension = std::stol(std::string(numberLiteral.text, numberLiteral.length));
-		dimensions.push_back(dimension);
+		Token length = tokenizer->GetToken();
+		if (length.type == TokenTypeT::NUMBER_LITERAL)
+		{
+			uint32 dimension = std::stol(std::string(length.text, length.length));
+			dimensions.push_back(std::make_pair(dimension, ""));
+		}
+		else if (length.type == TokenTypeT::IDENTIFIER)
+		{
+			std::string dimension(length.text, length.length);
+			dimensions.push_back(std::make_pair(0, dimension));
+		}
 		Token closeBracket;
 		if (tokenizer->Expect(TokenTypeT::CLOSE_BRACKET, &closeBracket)) COMPILE_ERROR(closeBracket.line, closeBracket.column, "Exprected ']' after integer literal");
 		openBracket = tokenizer->PeekToken();
@@ -1720,10 +2146,21 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 			else
 			{
 				uint32 slot = m_ScopeStack.back()->Resolve(members[0].first);
-				TypeInfo localTypeInfo = m_ScopeStack.back()->GetLocalTypeInfo(slot);
-				objExpr = new ASTExpressionPushLocal(slot, localTypeInfo);
-				if (members[0].second)
-					objExpr = new ASTExpressionDereference(objExpr);
+				if (slot == INVALID_ID)
+				{
+					ASTExpression* thisExpr = new ASTExpressionThis(m_Program->GetClassID(m_CurrentClassName));
+					thisExpr = new ASTExpressionDereference(thisExpr);
+					std::vector<std::string> membs;
+					membs.push_back(members[0].first);
+					objExpr = new ASTExpressionPushMember(thisExpr, membs);
+				}
+				else
+				{
+					ScopeLocalDeclaration declaration = m_ScopeStack.back()->GetDeclarationInfo(slot);
+					objExpr = new ASTExpressionPushLocal(slot, declaration.type, declaration.templateTypeName, declaration.command);
+					if (members[0].second)
+						objExpr = new ASTExpressionDereference(objExpr);
+				}
 			}
 			i++;
 		}
@@ -1802,7 +2239,7 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 		}
 		else
 		{
-			chainExpr->isStatement = true;
+			//chainExpr->isStatement = true;
 		}
 	}
 	else if (peek.type == TokenTypeT::DOT)
@@ -1840,6 +2277,168 @@ void Parser::ParseMembers(Tokenizer* tokenizer, std::vector<std::pair<std::strin
 		*functionCall = true;
 	else
 		*functionCall = false;
+}
+
+TemplateInstantiation Parser::ParseTemplateInstantiation(Tokenizer* tokenizer, Class* parentClass, TemplateInstantiationCommand* command, bool* templatedType)
+{
+	TemplateInstantiation instantiation;
+	uint32 angleDepth = 1;
+
+	while (true)
+	{
+		Token t = tokenizer->PeekToken();
+		if (t.type == TokenTypeT::END)
+			break;
+
+		if (t.type == TokenTypeT::IDENTIFIER || Tokenizer::IsTokenPrimitiveType(t))
+		{
+			tokenizer->Expect(TokenTypeT::IDENTIFIER);
+			std::string typeName(t.text, t.length);
+			Token next = tokenizer->PeekToken();
+
+			if (next.type == TokenTypeT::LESS)
+			{
+				tokenizer->Expect(TokenTypeT::LESS);
+				TemplateInstantiationCommand* subCmd = new TemplateInstantiationCommand();
+				subCmd->type = m_Program->GetClassID(typeName);
+				TemplateInstantiation nested = ParseTemplateInstantiation(tokenizer, m_Program->GetClass(m_Program->GetTypeID(typeName)), subCmd, templatedType);
+
+				TemplateInstantiationCommandArg arg;
+				arg.type = 1;
+				arg.command = subCmd;
+				command->args.push_back(arg);
+
+				bool isTemplate = false;
+				for (uint32 i = 0; i < nested.args.size(); i++)
+				{
+					if (nested.args[i].value == (uint16)ValueType::TEMPLATE_TYPE)
+					{
+						isTemplate = true;
+						break;
+					}
+				}
+
+				if (!isTemplate)
+				{
+					TemplateArgument arg;
+					arg.type = TemplateParameterType::TYPE;
+					arg.value = AddTemplateInstantiationType(typeName, nested);
+					instantiation.args.push_back(arg);
+				}
+
+			}
+			else
+			{
+				uint8 pointerLevel = ParsePointerLevel(tokenizer);
+
+				const TemplateDefinition& definition = parentClass->GetTemplateDefinition();
+				TemplateParameterType paramType = TemplateParameterType::TYPE;
+				for (uint32 i = 0; i < definition.parameters.size(); i++)
+				{
+					if (definition.parameters[i].name == typeName)
+					{
+						paramType = definition.parameters[i].type;
+						break;
+					}
+				}
+
+				TemplateArgument arg;
+				arg.type = paramType;
+				arg.value = m_Program->GetTypeID(typeName);
+				arg.pointerLevel = pointerLevel;
+
+				if (arg.value == INVALID_ID)
+				{
+					if (arg.type != TemplateParameterType::INT)
+						arg.type = TemplateParameterType::TEMPLATE_TYPE;
+
+					arg.value = (uint16)ValueType::TEMPLATE_TYPE;
+					arg.templateTypeName = typeName;
+					*templatedType = true;
+				}
+
+				TemplateInstantiationCommandArg cmdArg;
+				cmdArg.type = 0;
+				cmdArg.arg = arg;
+				command->args.push_back(cmdArg);
+
+				instantiation.args.push_back(arg);
+			}
+		}
+		else if (t.type == TokenTypeT::NUMBER_LITERAL)
+		{
+			tokenizer->Expect(TokenTypeT::NUMBER_LITERAL);
+			std::string numberString(t.text, t.length);
+			TemplateArgument arg;
+			arg.type = TemplateParameterType::INT;
+			arg.value = std::stol(numberString);
+			instantiation.args.push_back(arg);
+		}
+
+		t = tokenizer->PeekToken();
+
+		if (t.type == TokenTypeT::COMMA)
+		{
+			tokenizer->Expect(TokenTypeT::COMMA);
+			continue;
+		}
+		else if (t.type == TokenTypeT::GREATER)
+		{
+			tokenizer->Expect(TokenTypeT::GREATER);
+			break;
+		}
+		else
+		{
+			// Unexpected token -> syntax error
+			break;
+		}
+	}
+
+	return instantiation;
+}
+
+static bool IsPrimitiveTypeName(const std::string& name)
+{
+	static const std::unordered_set<std::string> primitiveNames = {
+		"uint8", "uint16", "uint32", "uint64",
+		"int8", "int16", "int32", "int64",
+		"real32", "real64", "bool", "char", "string", "void"
+	};
+	return primitiveNames.find(name) != primitiveNames.end();
+}
+
+static ValueType PrimitiveTypeFromName(const std::string& name)
+{
+	if (name == "uint8")   return ValueType::UINT8;
+	if (name == "uint16")  return ValueType::UINT16;
+	if (name == "uint32")  return ValueType::UINT32;
+	if (name == "uint64")  return ValueType::UINT64;
+	if (name == "int8")    return ValueType::INT8;
+	if (name == "int16")   return ValueType::INT16;
+	if (name == "int32")   return ValueType::INT32;
+	if (name == "int64")   return ValueType::INT64;
+	if (name == "real32")  return ValueType::REAL32;
+	if (name == "real64")  return ValueType::REAL64;
+	if (name == "bool")    return ValueType::BOOL;
+	if (name == "char")    return ValueType::CHAR;
+	if (name == "void")    return ValueType::VOID_T;
+	return ValueType::LAST_TYPE;
+}
+
+uint32 Parser::AddTemplateInstantiationType(const std::string& baseName, const TemplateInstantiation& nested)
+{
+	if (IsPrimitiveTypeName(baseName))
+	{
+		ValueType type = PrimitiveTypeFromName(baseName);
+		return static_cast<uint32>(type);
+	}
+
+	uint16 id = m_Program->GetClassID(baseName);
+	if (id == INVALID_ID)
+		return INVALID_ID;
+
+	Class* cls = m_Program->GetClass(id);
+	return cls->InstantiateTemplate(m_Program, nested);
 }
 
 ASTExpressionModuleFunctionCall* Parser::MakeModuleFunctionCall(uint16 moduleID, const std::string& moduleName, const std::string& functionName, const std::vector<ASTExpression*>& args)
@@ -1880,10 +2479,42 @@ Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& nam
 
 	Scope* functionScope = new Scope();
 
+	TemplateInstantiationCommand* command = nullptr;
+	if (cls->IsTemplateClass())
+	{
+		command = new TemplateInstantiationCommand();
+		command->type = cls->GetID();
+		const TemplateDefinition& definition = cls->GetTemplateDefinition();
+		std::string paramText = "";
+		for (uint32 i = 0; i < definition.parameters.size(); i++)
+		{
+			paramText += definition.parameters[i].name;
+			if ((i + 1) < definition.parameters.size())
+				paramText += ", ";
+		}
+		paramText += "> TLS_Other";
+
+		char* str = (char*)malloc(paramText.size() + 1);
+		strcpy(str, paramText.c_str());
+
+		Tokenizer tokenizer;
+		tokenizer.at = str;
+
+		bool templatedType = false;
+		TemplateInstantiation instantiation = ParseTemplateInstantiation(&tokenizer, cls, command, &templatedType);
+		if (!templatedType)
+		{
+			//Error
+		}
+
+		free(str);
+	}
+
 	FunctionParameter parameter;
 	parameter.isReference = true;
 	parameter.type = TypeInfo(cls->GetID(), 0);
-	parameter.variableID = functionScope->AddLocal("#TLS_Other", TypeInfo(cls->GetID(), 0));
+	parameter.variableID = functionScope->AddLocal("#TLS_Other", TypeInfo(cls->GetID(), 0), "");
+	parameter.instantiationCommand = command;
 	function->parameters.push_back(parameter);
 
 	const std::vector<ClassField>& members = cls->GetMemberFields();
@@ -1902,16 +2533,16 @@ Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& nam
 			for (uint32 d = 0; d < member.numDimensions; d++)
 			{
 				std::string idxName = "#TLS_idx_" + std::to_string(i) + "_" + std::to_string(d);
-				indexLocals.push_back(functionScope->AddLocal(idxName, TypeInfo((uint16)ValueType::UINT32, 0)));
+				indexLocals.push_back(functionScope->AddLocal(idxName, TypeInfo((uint16)ValueType::UINT32, 0), ""));
 			}
 
 			ASTExpression* thisMember = new ASTExpressionPushMember(new ASTExpressionDereference(new ASTExpressionThis(cls->GetID())), membs);
-			ASTExpression* otherMember = new ASTExpressionPushMember(new ASTExpressionPushLocal(parameter.variableID, parameter.type), membs);
+			ASTExpression* otherMember = new ASTExpressionPushMember(new ASTExpressionPushLocal(parameter.variableID, parameter.type, "", parameter.instantiationCommand), membs);
 
 			std::vector<ASTExpression*> indexExprs;
 			for (uint32 d = 0; d < member.numDimensions; d++)
 			{
-				indexExprs.push_back(new ASTExpressionPushLocal(indexLocals[d], TypeInfo((uint16)ValueType::UINT32, 0)));
+				indexExprs.push_back(new ASTExpressionPushLocal(indexLocals[d], TypeInfo((uint16)ValueType::UINT32, 0), ""));
 			}
 
 			thisMember = new ASTExpressionPushIndex(thisMember, indexExprs);
@@ -1928,11 +2559,11 @@ Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& nam
 				ASTExpressionDeclarePrimitive* declareExpr = new ASTExpressionDeclarePrimitive(ValueType::UINT32, idx);
 
 				ASTExpressionBinary* condExpr = new ASTExpressionBinary(
-					new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::INT32, 0)),
-					new ASTExpressionConstUInt32(member.dimensions[dim]),
+					new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::UINT32, 0), ""),
+					new ASTExpressionConstUInt32(member.dimensions[dim].first),
 					Operator::LESS);
 
-				ASTExpressionUnaryUpdate* incrExpr = new ASTExpressionUnaryUpdate(new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::UINT32, 0)), ASTUnaryUpdateOp::PRE_INC);
+				ASTExpressionUnaryUpdate* incrExpr = new ASTExpressionUnaryUpdate(new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::UINT32, 0), ""), ASTUnaryUpdateOp::PRE_INC);
 
 				std::vector<ASTExpression*> bodyBlock = { loopBody };
 
@@ -1944,7 +2575,7 @@ Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& nam
 		else
 		{
 			ASTExpressionPushMember* pushMemberExpr = new ASTExpressionPushMember(new ASTExpressionDereference(new ASTExpressionThis(cls->GetID())), membs); //Access this->member
-			ASTExpressionPushMember* pushParamExpr = new ASTExpressionPushMember(new ASTExpressionPushLocal(parameter.variableID, parameter.type), membs); //Access param.member
+			ASTExpressionPushMember* pushParamExpr = new ASTExpressionPushMember(new ASTExpressionPushLocal(parameter.variableID, parameter.type, "", parameter.instantiationCommand), membs); //Access param.member
 			ASTExpressionSet* setExpr = new ASTExpressionSet(pushMemberExpr, pushParamExpr);
 			function->body.push_back(setExpr);
 		}

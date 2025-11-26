@@ -5,6 +5,7 @@
 #include <vector>
 #include <new>
 #include "Operator.h"
+#include "Template.h"
 
 class Program;
 class Class;
@@ -17,6 +18,7 @@ struct ASTExpression
 	virtual void EmitCode(Program* program) = 0;
 	virtual TypeInfo GetTypeInfo(Program* program) = 0;
 	virtual bool Resolve(Program* program) { return true; }
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) = 0;
 
 	bool isStatement;
 	bool setIsStatement;
@@ -31,6 +33,7 @@ struct ASTExpressionLiteral : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionConstUInt32 : public ASTExpression
@@ -42,6 +45,7 @@ struct ASTExpressionConstUInt32 : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionModuleFunctionCall : public ASTExpression
@@ -55,6 +59,7 @@ struct ASTExpressionModuleFunctionCall : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDeclarePrimitive : public ASTExpression
@@ -68,18 +73,22 @@ struct ASTExpressionDeclarePrimitive : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionPushLocal : public ASTExpression
 {
 	uint16 slot;
 	TypeInfo typeInfo;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 
-	ASTExpressionPushLocal(uint16 slot, const TypeInfo& typeInfo) :
-		slot(slot), typeInfo(typeInfo) { }
+	ASTExpressionPushLocal(uint16 slot, const TypeInfo& typeInfo, const std::string& templateTypeName, TemplateInstantiationCommand* instantiationCommand = nullptr) :
+		slot(slot), typeInfo(typeInfo), templateTypeName(templateTypeName), instantiationCommand(instantiationCommand) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDeclarePointer : public ASTExpression
@@ -88,12 +97,15 @@ struct ASTExpressionDeclarePointer : public ASTExpression
 	uint8 pointerLevel;
 	uint16 slot;
 	ASTExpression* assignExpr;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 
-	ASTExpressionDeclarePointer(uint16 type, uint8 pointerLevel, uint16 slot, ASTExpression* assignExpr = nullptr) :
-		type(type), pointerLevel(pointerLevel), slot(slot), assignExpr(assignExpr) { }
+	ASTExpressionDeclarePointer(uint16 type, uint8 pointerLevel, uint16 slot, ASTExpression* assignExpr = nullptr, const std::string& templateTypeName = "", TemplateInstantiationCommand* instantiationCommand = nullptr) :
+		type(type), pointerLevel(pointerLevel), slot(slot), assignExpr(assignExpr), templateTypeName(templateTypeName), instantiationCommand(instantiationCommand) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionSet : public ASTExpression
@@ -108,6 +120,7 @@ struct ASTExpressionSet : public ASTExpression
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionAddressOf : public ASTExpression
@@ -119,6 +132,7 @@ struct ASTExpressionAddressOf : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDereference : public ASTExpression
@@ -130,6 +144,7 @@ struct ASTExpressionDereference : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionStackArrayDeclare : public ASTExpression
@@ -137,26 +152,32 @@ struct ASTExpressionStackArrayDeclare : public ASTExpression
 	uint16 type;
 	uint8 elementPointerLevel;
 	uint16 slot;
-	std::vector<uint32> dimensions;
+	std::vector<std::pair<uint32, std::string>> dimensions;
 	std::vector<ASTExpression*> initializerExprs;
+	std::string templateTypeName;
 
-	ASTExpressionStackArrayDeclare(uint16 type, uint8 elementPointerLevel, uint16 slot, const std::vector<uint32>& dimensions, const std::vector<ASTExpression*>& initializerExprs) :
-		type(type), elementPointerLevel(elementPointerLevel), slot(slot), dimensions(dimensions), initializerExprs(initializerExprs) { }
+	ASTExpressionStackArrayDeclare(uint16 type, uint8 elementPointerLevel, uint16 slot, const std::vector<std::pair<uint32, std::string>>& dimensions,
+		const std::vector<ASTExpression*>& initializerExprs, const std::string& templateTypeName) :
+		type(type), elementPointerLevel(elementPointerLevel), slot(slot), dimensions(dimensions), initializerExprs(initializerExprs), templateTypeName(templateTypeName) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionPushIndex : public ASTExpression
 {
 	ASTExpression* expr;
 	std::vector<ASTExpression*> indexExprs;
+	uint16 indexFunctionID;
 
 	ASTExpressionPushIndex(ASTExpression* expr, const std::vector<ASTExpression*> indexExprs) :
-		expr(expr), indexExprs(indexExprs) { }
+		expr(expr), indexExprs(indexExprs), indexFunctionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
+	virtual bool Resolve(Program* program) override;
 };
 
 struct ASTExpressionBinary : public ASTExpression
@@ -172,6 +193,7 @@ struct ASTExpressionBinary : public ASTExpression
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionIfElse : public ASTExpression
@@ -187,6 +209,7 @@ struct ASTExpressionIfElse : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionFor : public ASTExpression
@@ -201,6 +224,7 @@ struct ASTExpressionFor : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 enum class ASTUnaryUpdateOp
@@ -221,6 +245,7 @@ struct ASTExpressionUnaryUpdate : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionWhile : public ASTExpression
@@ -233,18 +258,21 @@ struct ASTExpressionWhile : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionBreak : public ASTExpression
 {
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionContinue : public ASTExpression
 {
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionStaticFunctionCall : public ASTExpression
@@ -260,6 +288,7 @@ struct ASTExpressionStaticFunctionCall : public ASTExpression
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionReturn : public ASTExpression
@@ -272,6 +301,7 @@ struct ASTExpressionReturn : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionStaticVariable : public ASTExpression
@@ -291,6 +321,7 @@ struct ASTExpressionStaticVariable : public ASTExpression
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionModuleConstant : public ASTExpression
@@ -303,6 +334,7 @@ struct ASTExpressionModuleConstant : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDeclareObjectWithConstructor : public ASTExpression
@@ -311,13 +343,16 @@ struct ASTExpressionDeclareObjectWithConstructor : public ASTExpression
 	std::vector<ASTExpression*> argExprs;
 	uint16 slot;
 	uint16 functionID;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 
-	ASTExpressionDeclareObjectWithConstructor(uint16 type, const std::vector<ASTExpression*> argExprs, uint16 slot) :
-		type(type), argExprs(argExprs), slot(slot), functionID(INVALID_ID) { }
+	ASTExpressionDeclareObjectWithConstructor(uint16 type, const std::vector<ASTExpression*> argExprs, uint16 slot, const std::string& templateTypeName, TemplateInstantiationCommand* instantiationCommand = nullptr) :
+		type(type), argExprs(argExprs), slot(slot), templateTypeName(templateTypeName), instantiationCommand(instantiationCommand), functionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDeclareObjectWithAssign : public ASTExpression
@@ -326,13 +361,16 @@ struct ASTExpressionDeclareObjectWithAssign : public ASTExpression
 	uint16 slot;
 	ASTExpression* assignExpr;
 	uint16 copyConstructorID;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 
-	ASTExpressionDeclareObjectWithAssign(uint16 type, uint16 slot, ASTExpression* assignExpr) : 
-		type(type), slot(slot), assignExpr(assignExpr), copyConstructorID(INVALID_ID) { }
+	ASTExpressionDeclareObjectWithAssign(uint16 type, uint16 slot, ASTExpression* assignExpr, const std::string& templateTypeName, TemplateInstantiationCommand* instantiationCommand = nullptr) :
+		type(type), slot(slot), assignExpr(assignExpr), templateTypeName(templateTypeName), instantiationCommand(instantiationCommand), copyConstructorID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionPushMember : public ASTExpression
@@ -349,6 +387,7 @@ struct ASTExpressionPushMember : public ASTExpression
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionMemberFunctionCall : public ASTExpression
@@ -357,13 +396,15 @@ struct ASTExpressionMemberFunctionCall : public ASTExpression
 	std::string functionName;
 	std::vector<ASTExpression*> argExprs;
 	uint16 functionID;
+	bool isVirtual;
 
 	ASTExpressionMemberFunctionCall(ASTExpression* objExpr, const std::string& functionName, const std::vector<ASTExpression*> argExprs) :
-		objExpr(objExpr), functionName(functionName), argExprs(argExprs), functionID(INVALID_ID) { }
+		objExpr(objExpr), functionName(functionName), argExprs(argExprs), functionID(INVALID_ID), isVirtual(false) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionThis : public ASTExpression
@@ -375,6 +416,7 @@ struct ASTExpressionThis : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDeclareReference : public ASTExpression
@@ -383,12 +425,15 @@ struct ASTExpressionDeclareReference : public ASTExpression
 	uint8 pointerLevel;
 	ASTExpression* assignExpr;
 	uint16 slot;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 
-	ASTExpressionDeclareReference(uint16 type, uint8 pointerLevel, ASTExpression* assignExpr, uint16 slot) :
-		type(type), pointerLevel(pointerLevel), assignExpr(assignExpr), slot(slot) { }
+	ASTExpressionDeclareReference(uint16 type, uint8 pointerLevel, ASTExpression* assignExpr, uint16 slot, const std::string& templateTypeName, TemplateInstantiationCommand* instantiationCommand = nullptr) :
+		type(type), pointerLevel(pointerLevel), assignExpr(assignExpr), slot(slot), templateTypeName(templateTypeName), instantiationCommand(instantiationCommand) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionConstructorCall : public ASTExpression
@@ -396,13 +441,16 @@ struct ASTExpressionConstructorCall : public ASTExpression
 	uint16 type;
 	std::vector<ASTExpression*> argExprs;
 	uint16 functionID;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 
-	ASTExpressionConstructorCall(uint16 type, const std::vector<ASTExpression*> argExprs) :
-		type(type), argExprs(argExprs), functionID(INVALID_ID) { }
+	ASTExpressionConstructorCall(uint16 type, const std::vector<ASTExpression*> argExprs, const std::string& templateTypeName, TemplateInstantiationCommand* instantiationCommand = nullptr) :
+		type(type), argExprs(argExprs), templateTypeName(templateTypeName), instantiationCommand(instantiationCommand), functionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionNew : public ASTExpression
@@ -410,13 +458,15 @@ struct ASTExpressionNew : public ASTExpression
 	uint16 type;
 	std::vector<ASTExpression*> argExprs;
 	uint16 functionID;
+	std::string templateTypeName;
 
-	ASTExpressionNew(uint16 type, const std::vector<ASTExpression*> argExprs) :
-		type(type), argExprs(argExprs), functionID(INVALID_ID) { }
+	ASTExpressionNew(uint16 type, const std::vector<ASTExpression*> argExprs, const std::string& templateTypeName) :
+		type(type), argExprs(argExprs), templateTypeName(templateTypeName), functionID(INVALID_ID) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual bool Resolve(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionDelete : public ASTExpression
@@ -429,6 +479,7 @@ struct ASTExpressionDelete : public ASTExpression
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
 
 struct ASTExpressionNewArray : public ASTExpression
@@ -436,10 +487,12 @@ struct ASTExpressionNewArray : public ASTExpression
 	uint16 type;
 	uint8 pointerLevel;
 	ASTExpression* sizeExpr;
+	std::string templateTypeName;
 
-	ASTExpressionNewArray(uint16 type, uint8 pointerLevel, ASTExpression* sizeExpr) :
-		type(type), pointerLevel(pointerLevel), sizeExpr(sizeExpr) { }
+	ASTExpressionNewArray(uint16 type, uint8 pointerLevel, ASTExpression* sizeExpr, const std::string& templateTypeName) :
+		type(type), pointerLevel(pointerLevel), sizeExpr(sizeExpr), templateTypeName(templateTypeName) { }
 
 	virtual void EmitCode(Program* program) override;
 	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };

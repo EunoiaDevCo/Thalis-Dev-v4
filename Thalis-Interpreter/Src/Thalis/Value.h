@@ -813,7 +813,7 @@ struct Value
 		if (!isReference && IsPointer() && value.IsPointer())
 		{
 			if (pointerLevel != value.pointerLevel || type != value.type) return;
-			memcpy(target, source.data, sizeof(void*));
+			*(void**)data = *(void**)source.data;
 			return;
 		}
 

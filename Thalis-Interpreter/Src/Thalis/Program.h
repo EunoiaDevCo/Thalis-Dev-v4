@@ -39,7 +39,7 @@ enum class OpCode
 
 	SET,
 
-	MODULE_CONSTANT, MEMBER_FUNCTION_CALL, CONSTRUCTOR_CALL,
+	MODULE_CONSTANT, MEMBER_FUNCTION_CALL, CONSTRUCTOR_CALL, VIRTUAL_FUNCTION_CALL,
 	MODULE_FUNCTION_CALL, STATIC_FUNCTION_CALL, RETURN, NEW, NEW_ARRAY,
 
 	DELETE, DELETE_ARRAY,
@@ -102,7 +102,7 @@ public:
 	void AddPushCStrCommand(char* value);
 	void AddPushLocalCommand(uint16 slot);
 	void AddPushTypedNullCommand(uint16 type, uint8 pointerLevel);
-	void AddPushIndexedCommand(uint64 typeSize, uint8 numIndices);
+	void AddPushIndexedCommand(uint64 typeSize, uint8 numIndices, uint16 indexFunctionID, uint16 classID);
 	void AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16 type, uint8 pointerLevel, bool isReference, bool isArray);
 	void AddPushMemberCommand(uint16 type, uint8 pointerLevel, uint64 offset, bool isReference, bool isArray);
 
@@ -124,6 +124,7 @@ public:
 	void AddReturnCommand(uint8 returnInfo);
 	void AddMemberFunctionCallCommand(uint16 classID, uint16 functionID, bool usesReturnValue);
 	void AddConstructorCallCommand(uint16 type, uint16 functionID);
+	void AddVirtualFunctionCallCommand(uint16 functionID, bool usesReturnValue);
 
 	void AddUnaryUpdateCommand(uint8 op, bool pushToStack);
 	void AddAritmaticCommand(Operator op, uint16 functionID);
@@ -157,9 +158,12 @@ public:
 	uint16 GetModuleID(const std::string& name);
 	void AddModule(const std::string& name, uint16 id);
 	uint64 GetTypeSize(uint16 type);
+	uint16 GetTypeID(const std::string& name);
 
 	uint32 GetCodeSize() const;
+
 	bool Resolve();
+	void BuildVTables();
 	void EmitCode();
 
 	inline BumpAllocator* GetStackAllocator() const { return m_StackAllocator; }

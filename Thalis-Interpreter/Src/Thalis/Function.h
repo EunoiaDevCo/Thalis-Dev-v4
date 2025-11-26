@@ -3,6 +3,7 @@
 #include <vector>
 #include "TypeInfo.h"
 #include <string>
+#include "Template.h"
 
 enum class AccessModifier
 {
@@ -15,6 +16,8 @@ struct FunctionParameter
 	TypeInfo type;
 	bool isReference;
 	uint16 variableID;
+	std::string templateTypeName;
+	TemplateInstantiationCommand* instantiationCommand;
 };
 
 struct ASTExpression;
@@ -32,6 +35,7 @@ struct Function
 	std::vector<ASTExpression*> body;
 	uint16 id;
 	uint16 numLocals;
+	std::string returnTemplateTypeName;
 
 	std::string GenerateSignature() const;
 

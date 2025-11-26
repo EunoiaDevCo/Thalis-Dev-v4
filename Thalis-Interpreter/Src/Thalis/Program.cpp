@@ -139,11 +139,14 @@ void Program::AddPushTypedNullCommand(uint16 type, uint8 pointerLevel)
 	WriteUInt8(pointerLevel);
 }
 
-void Program::AddPushIndexedCommand(uint64 typeSize, uint8 numIndices)
+void Program::AddPushIndexedCommand(uint64 typeSize, uint8 numIndices, uint16 indexFunctionID, uint16 classID)
 {
 	WriteOPCode(OpCode::PUSH_INDEXED);
 	WriteUInt64(typeSize);
 	WriteUInt8(numIndices);
+	WriteUInt16(indexFunctionID);
+	if (indexFunctionID != INVALID_ID)
+		WriteUInt16(classID);
 }
 
 void Program::AddPushStaticVariableCommand(uint16 classID, uint64 offset, uint16 type, uint8 pointerLevel, bool isReference, bool isArray)
@@ -293,6 +296,13 @@ void Program::AddConstructorCallCommand(uint16 type, uint16 functionID)
 	WriteOPCode(OpCode::CONSTRUCTOR_CALL);
 	WriteUInt16(type);
 	WriteUInt16(functionID);
+}
+
+void Program::AddVirtualFunctionCallCommand(uint16 functionID, bool usesReturnValue)
+{
+	WriteOPCode(OpCode::VIRTUAL_FUNCTION_CALL);
+	WriteUInt16(functionID);
+	WriteUInt8(usesReturnValue);
 }
 
 void Program::AddUnaryUpdateCommand(uint8 op, bool pushToStack)
@@ -514,6 +524,32 @@ uint64 Program::GetTypeSize(uint16 type)
 	return GetClass(type)->GetSize();
 }
 
+static ValueType PrimitiveTypeFromName(const std::string& name)
+{
+	if (name == "uint8")   return ValueType::UINT8;
+	if (name == "uint16")  return ValueType::UINT16;
+	if (name == "uint32")  return ValueType::UINT32;
+	if (name == "uint64")  return ValueType::UINT64;
+	if (name == "int8")    return ValueType::INT8;
+	if (name == "int16")   return ValueType::INT16;
+	if (name == "int32")   return ValueType::INT32;
+	if (name == "int64")   return ValueType::INT64;
+	if (name == "real32")  return ValueType::REAL32;
+	if (name == "real64")  return ValueType::REAL64;
+	if (name == "bool")    return ValueType::BOOL;
+	if (name == "char")    return ValueType::CHAR;
+	if (name == "void")    return ValueType::VOID_T;
+	return ValueType::LAST_TYPE;
+}
+
+uint16 Program::GetTypeID(const std::string& name)
+{
+	ValueType primitiveType = PrimitiveTypeFromName(name);
+	if (primitiveType != ValueType::LAST_TYPE) return (uint16)primitiveType;
+
+	return GetClassID(name);
+}
+
 uint32 Program::GetCodeSize() const
 {
 	return m_Code.size();
@@ -525,6 +561,12 @@ bool Program::Resolve()
 		m_CreatedExpressions[i]->Resolve(this);
 
 	return true;
+}
+
+void Program::BuildVTables()
+{
+	for (uint32 i = 0; i < m_Classes.size(); i++)
+		m_Classes[i]->BuildVTable();
 }
 
 void Program::EmitCode()
@@ -604,6 +646,39 @@ void Program::ExecuteOpCode(OpCode opcode)
 	case OpCode::PUSH_INDEXED: {
 		uint64 typeSize = ReadUInt64();
 		uint8 numIndices = ReadUInt8();
+		uint16 indexFunctionID = ReadUInt16();
+
+		if (indexFunctionID != INVALID_ID)
+		{
+			uint16 classID = ReadUInt16();
+			Class* cls = GetClass(classID);
+			Function* function = cls->GetFunction(indexFunctionID);
+
+			CallFrame callFrame;
+			callFrame.basePointer = m_Stack.size();
+			callFrame.popThisStack = true;
+			callFrame.returnPC = m_ProgramCounter;
+			callFrame.usesReturnValue = true;
+			callFrame.loopCount = m_LoopStack.size();
+
+			m_CurrentScope++;
+			m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+			callFrame.scopeCount = m_CurrentScope;
+
+			Frame* frame = m_FramePool.Acquire(function->numLocals);
+			AddFunctionArgsToFrame(frame, function);
+
+			Value objToCallFunctionOn = m_Stack.back(); m_Stack.pop_back();
+			m_ThisStack.push_back(Value::MakePointer(classID, 1, objToCallFunctionOn.data, m_StackAllocator));
+
+			m_CallStack.push_back(callFrame);
+			m_FrameStack.push_back(frame);
+
+			m_ProgramCounter = function->pc;
+
+			break;
+		}
+
 		for (uint8 i = 0; i < numIndices; i++)
 		{
 			m_Dimensions[i] = m_Stack.back().Actual().GetUInt32();
@@ -618,7 +693,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		element.pointerLevel = base.pointerLevel - 1;
 		element.isArray = false;
 		element.isReference = false;
-		
+
 		if (base.isArray)
 		{
 			uint32 index = base.Calculate1DArrayIndex(m_Dimensions);
@@ -634,7 +709,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		}
 		else if (base.IsPointer())
 		{
-			void* ptr = base.data;
+			void* ptr = *(void**)base.data;
 
 			uint8 pointerLevel = element.pointerLevel;
 			for (uint32 i = 0; i < numIndices; i++)
@@ -1028,6 +1103,37 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		m_ProgramCounter = function->pc;
 	} break;
+	case OpCode::VIRTUAL_FUNCTION_CALL: {
+		uint16 functionID = ReadUInt16();
+		bool usesReturnValue = ReadUInt8();
+
+		Value objToCallFunctionOn = m_Stack.back(); m_Stack.pop_back();
+		m_ThisStack.push_back(objToCallFunctionOn);
+
+		VTable* vtable = *(VTable**)((uint8*)objToCallFunctionOn.data - sizeof(VTable*));
+		Function* function = vtable->GetFunction(functionID);
+
+		CallFrame callFrame;
+		callFrame.basePointer = m_Stack.size();
+		callFrame.popThisStack = true;
+		callFrame.returnPC = m_ProgramCounter;
+		callFrame.usesReturnValue = usesReturnValue;
+		callFrame.loopCount = m_LoopStack.size();
+
+		m_CurrentScope++;
+		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
+
+		Frame* frame = m_FramePool.Acquire(function->numLocals);
+		AddFunctionArgsToFrame(frame, function);
+
+		m_ThisStack.push_back(Value::MakePointer(objToCallFunctionOn.type, 1, objToCallFunctionOn.data, m_StackAllocator));
+
+		m_CallStack.push_back(callFrame);
+		m_FrameStack.push_back(frame);
+
+		m_ProgramCounter = function->pc;
+	} break;
 	case OpCode::CONSTRUCTOR_CALL: {
 		uint16 type = ReadUInt16();
 		uint16 functionID = ReadUInt16();
@@ -1411,18 +1517,17 @@ void Program::ExecuteOpCode(OpCode opcode)
 		AddDestructorRecursive(object);
 		ExecutePendingDestructors(dcount);
 
-		m_HeapAllocator->Free(object.data);
+		m_HeapAllocator->Free((uint8*)object.data - sizeof(VTable*));
 	} break;
 	case OpCode::DELETE_ARRAY: {
 		Value heapArray = m_Stack.back().Dereference();
 		m_Stack.pop_back();
 
-		Class* cls = GetClass(heapArray.type);
 		ArrayHeader* arrayHeader = (ArrayHeader*)((uint8*)heapArray.data - sizeof(ArrayHeader));
 		if (arrayHeader->elementPointerLevel == 0)
 		{
 			uint32 dcount = m_PendingDestructors.size();
-			uint64 typeSize = cls->GetSize();
+			uint64 typeSize = GetTypeSize(heapArray.type);
 			uint32 numElements = 1;
 			for (uint32 i = 0; i < arrayHeader->numDimensions; i++)
 				numElements *= arrayHeader->dimensions[i];
@@ -1440,7 +1545,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 			ExecutePendingDestructors(dcount);
 		}
 
-		m_HeapAllocator->Free((uint8*)heapArray.data - sizeof(ArrayHeader));
+		m_HeapAllocator->Free(arrayHeader);
 	} break;
 	}
 }
@@ -1582,7 +1687,7 @@ void Program::AddDestructorRecursive(const Value& value)
 			uint64 typeSize = GetTypeSize(field.type.type);
 			uint32 numElements = 1;
 			for (uint32 j = 0; j < field.numDimensions; j++)
-				numElements *= field.dimensions[j];
+				numElements *= field.dimensions[j].first;
 
 			uint8* data = (uint8*)value.data + field.offset;
 			for (uint32 j = 0; j < numElements; j++)
@@ -1616,7 +1721,8 @@ void Program::ExecutePendingDestructors(uint32 offset)
 	for (uint32 i = offset; i < m_PendingDestructors.size(); i++)
 	{
 		const Value& object = m_PendingDestructors[i];
-		Function* destructor = GetClass(object.type)->GetDestructor();
+		Class* cls = GetClass(object.type);
+		Function* destructor = cls->GetDestructor();
 		if (!destructor)
 			continue;
 

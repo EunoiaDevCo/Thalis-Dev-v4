@@ -5,6 +5,7 @@
 #include "Scope.h"
 #include "Tokenizer.h"
 #include "Function.h"
+#include "Template.h"
 
 class Program;
 class Class;
@@ -32,11 +33,13 @@ private:
 	ASTExpression* ParsePostFix(Tokenizer* tokenizer);
 	ASTExpression* ParsePrimary(Tokenizer* tokenizer);
 	void ParseArguments(Tokenizer* tokenizer, std::vector<ASTExpression*>& args);
-	void ParseArrayDimensions(Tokenizer* tokenizer, std::vector<uint32>& dimensions);
+	void ParseArrayDimensions(Tokenizer* tokenizer, std::vector<std::pair<uint32, std::string>>& dimensions);
 	void ParseArrayInitializers(Tokenizer* tokenizer, std::vector<ASTExpression*>& initializers);
 	void ParseArrayIndices(Tokenizer* tokenizer, std::vector<ASTExpression*>& indexExprs);
 	ASTExpression* ParseExpressionChain(Tokenizer* tokenizer, ASTExpression* objExpr, const std::vector<std::pair<std::string, bool>>& members, bool functionCall);
 	void ParseMembers(Tokenizer* tokenizer, std::vector<std::pair<std::string, bool>>& members, bool* functionCall);
+	TemplateInstantiation ParseTemplateInstantiation(Tokenizer* tokenizer, Class* cls, TemplateInstantiationCommand* command, bool* templatedType);
+	uint32 AddTemplateInstantiationType(const std::string& baseName, const TemplateInstantiation& nested);
 
 	ASTExpressionModuleFunctionCall* MakeModuleFunctionCall(uint16 moduleID, const std::string& moduleName, const std::string& functionCall, const std::vector<ASTExpression*>& args);
 	ASTExpressionModuleConstant* MakeModuleConstant(uint16 moduleID, const std::string& moduleName, const std::string& constantName);

@@ -170,32 +170,41 @@ Function* Class::FindFunctionBySignature(const std::string& signature)
 	return nullptr;
 }
 
-void Class::AddMemberField(const std::string& name, uint16 type, uint8 pointerLevel, uint64 offset, uint64 size, uint32* dimensions, uint8 numDimensions)
+void Class::AddMemberField(const std::string& name, uint16 type, uint8 pointerLevel, uint64 offset, uint64 size, const std::vector<std::pair<uint32,
+	std::string>>& dimensions, const std::string& templateTypeName, TemplateInstantiationCommand* command)
 {
+	if (HasBaseClass())
+		offset += m_BaseClass->GetSize();
+
 	ClassField field;
 	field.name = name;
 	field.type.type = type;
 	field.type.pointerLevel = pointerLevel;
+	field.type.derivedType = type;
 	field.offset = offset;
 	field.size = size;
-	field.numDimensions = numDimensions;
-	for (uint32 i = 0; i < numDimensions; i++)
+	field.numDimensions = dimensions.size();
+	field.instantiationCommand = command;
+	field.templateTypeName = templateTypeName;
+	for (uint32 i = 0; i < field.numDimensions; i++)
 		field.dimensions[i] = dimensions[i];
 
 	m_MemberFields.push_back(field);
 }
 
-void Class::AddStaticField(const std::string& name, uint16 type, uint8 pointerLevel, uint64 offset, uint64 size, uint32* dimensions, uint8 numDimensions, ASTExpression* initializeExpr)
+void Class::AddStaticField(const std::string& name, uint16 type, uint8 pointerLevel, uint64 offset, uint64 size, const std::vector<std::pair<uint32, std::string>>& dimensions, ASTExpression* initializeExpr)
 {
 	ClassField field;
 	field.name = name;
 	field.type.type = type;
 	field.type.pointerLevel = pointerLevel;
+	field.type.derivedType = type;
 	field.offset = offset;
 	field.size = size;
 	field.initializeExpr = initializeExpr;
-	field.numDimensions = numDimensions;
-	for (uint32 i = 0; i < numDimensions; i++)
+	field.numDimensions = dimensions.size();
+	field.instantiationCommand = nullptr;
+	for (uint32 i = 0; i < field.numDimensions; i++)
 		field.dimensions[i] = dimensions[i];
 
 	m_StaticFields.push_back(field);
@@ -203,6 +212,9 @@ void Class::AddStaticField(const std::string& name, uint16 type, uint8 pointerLe
 
 void Class::EmitCode(Program* program)
 {
+	if (IsTemplateClass()) 
+		return;
+
 	for (uint32 i = 0; i < m_FunctionMap.size(); i++)
 	{
 		Function* function = m_FunctionMap[i];
@@ -264,6 +276,15 @@ uint64 Class::CalculateMemberOffset(Program* program, const std::vector<std::str
 				return subClass->CalculateMemberOffset(program, members, typeInfo, isArray, i + 1, memberOffset);
 			}
 		}
+
+		if (HasBaseClass())
+		{
+			uint64 baseOffset = currentOffset; // Base data always starts at 0 offset for the derived object
+			uint64 result = m_BaseClass->CalculateMemberOffset(program, members, typeInfo, isArray, currentMember, baseOffset);
+
+			if (result != UINT64_MAX)
+				return result; // Found in base class
+		}
 	}
 
 	// No member found
@@ -324,4 +345,294 @@ uint64 Class::CalculateStaticOffset(Program* program, const std::vector<std::str
 void* Class::GetStaticData(uint64 offset) const
 {
 	return (uint8*)m_StaticData.data + offset;
+}
+
+uint16 Class::InstantiateTemplate(Program* program, const TemplateInstantiation& instantiation)
+{
+	if (!IsTemplateClass()) return INVALID_ID;
+	if (m_TemplateDefinition.parameters.size() != instantiation.args.size()) return INVALID_ID;
+
+	std::string name = GenerateTemplateClassName(program, m_Name, instantiation);
+	uint16 classID = program->GetClassID(name);
+	if (classID != INVALID_ID)
+	{
+		return classID;
+	}
+
+	Class* cls = new Class(name);
+	classID = program->AddClass(cls);
+	cls->m_IsTemplateInstance = true;
+	
+	uint64 memberOffset = 0;
+	for (uint32 i = 0; i < m_MemberFields.size(); i++)
+	{
+		const ClassField& member = m_MemberFields[i];
+		TypeInfo typeInfo = member.type;
+
+		if (member.instantiationCommand)
+		{
+			typeInfo.type = ExecuteInstantiationCommand(program, member.instantiationCommand, instantiation);
+		}
+		else if (typeInfo.type == (uint16)ValueType::TEMPLATE_TYPE)
+		{
+			uint32 index = InstantiateTemplateGetIndex(program, member.templateTypeName);
+			typeInfo.type = instantiation.args[index].value;
+			typeInfo.pointerLevel += instantiation.args[index].pointerLevel;
+		}
+
+		uint64 typeSize = (typeInfo.pointerLevel > 0) ? sizeof(void*) : program->GetTypeSize(typeInfo.type);
+
+		std::vector<std::pair<uint32, std::string>> dimensions;
+		for (uint32 j = 0; j < member.numDimensions; j++)
+		{
+			if (!member.dimensions[j].second.empty())
+			{
+				uint32 index = InstantiateTemplateGetIndex(program, member.dimensions->second);
+				uint32 arrayLength = instantiation.args[index].value;
+				dimensions.push_back(std::make_pair(arrayLength, ""));
+			}
+			else
+			{
+				dimensions.push_back(std::make_pair(member.dimensions[j].first, ""));
+			}
+
+			typeSize *= dimensions[j].first;
+		}
+
+		cls->AddMemberField(member.name, typeInfo.type, typeInfo.pointerLevel, memberOffset, typeSize, dimensions, "");
+		memberOffset += typeSize;
+	}
+
+	cls->SetSize(memberOffset);
+	cls->SetStaticDataSize(0);
+
+	for (uint32 i = 0; i < m_FunctionMap.size(); i++)
+	{
+		Function* function = m_FunctionMap[i];
+		Function* injectedFunction = InstantiateTemplateInjectFunction(program, function, name, instantiation, cls);
+		cls->AddFunction(injectedFunction);
+	}
+
+	return classID;
+}
+
+//void Class::AddInstantiationCommand(TemplateInstantiationCommand* command)
+//{
+//	m_InstantiationCommands.push_back(command);
+//}
+
+int32 Class::InstantiateTemplateGetIndex(Program* program, const std::string& templateTypeName)
+{
+	for (uint32 i = 0; i < m_TemplateDefinition.parameters.size(); i++)
+	{
+		const TemplateParameter& param = m_TemplateDefinition.parameters[i];
+		if (param.name == templateTypeName)
+			return i;
+	}
+
+	return -1;
+}
+
+Function* Class::InstantiateTemplateInjectFunction(Program* program, Function* templatedFunction, const std::string& templatedTypeName, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	Function* injectedFunction = new Function();
+	injectedFunction->accessModifier = templatedFunction->accessModifier;
+	injectedFunction->isStatic = templatedFunction->isStatic;
+	injectedFunction->name = templatedFunction->name;
+	injectedFunction->returnInfo = templatedFunction->returnInfo;
+	injectedFunction->numLocals = templatedFunction->numLocals;
+
+	if (templatedFunction->name == m_Name) //Constructor so set new templated name
+		injectedFunction->name = templatedTypeName;
+	else
+		injectedFunction->name = templatedFunction->name;
+
+	if (injectedFunction->returnInfo.type == (uint16)ValueType::TEMPLATE_TYPE)
+	{
+		uint32 index = InstantiateTemplateGetIndex(program, templatedFunction->returnTemplateTypeName);
+		injectedFunction->returnInfo.type = instantiation.args[index].value;
+	}
+
+	for (uint32 j = 0; j < templatedFunction->parameters.size(); j++)
+	{
+		FunctionParameter param = templatedFunction->parameters[j];
+		if (param.type.type == (uint16)ValueType::TEMPLATE_TYPE)
+		{
+			uint32 index = InstantiateTemplateGetIndex(program, param.templateTypeName);
+			param.type.type = instantiation.args[index].value;
+			param.type.pointerLevel += instantiation.args[index].pointerLevel;
+		}
+
+		if (param.type.type == m_ID)
+			param.type.type = templatedClass->GetID();
+
+		if (param.instantiationCommand)
+		{
+			param.type.type = ExecuteInstantiationCommand(program, param.instantiationCommand, instantiation);
+		}
+
+		param.instantiationCommand = nullptr;
+
+		injectedFunction->parameters.push_back(param);
+	}
+
+	for (uint32 j = 0; j < templatedFunction->body.size(); j++)
+	{
+		ASTExpression* injectedExpr = templatedFunction->body[j]->InjectTemplateType(program, this, instantiation, templatedClass);
+		injectedFunction->body.push_back(injectedExpr);
+	}
+
+	return injectedFunction;
+}
+
+void Class::ExecuteInstantiationCommands(Program* program, const TemplateInstantiation& instantiation)
+{
+	for (uint32 i = 0; i < m_InstantiationCommands.size(); i++)
+		ExecuteInstantiationCommand(program, m_InstantiationCommands[i], instantiation);
+}
+
+uint16 Class::ExecuteInstantiationCommand(Program* program, TemplateInstantiationCommand* command, const TemplateInstantiation& instantiation)
+{
+	TemplateInstantiation result;
+	for (uint32 i = 0; i < command->args.size(); i++)
+	{
+		const TemplateInstantiationCommandArg& arg = command->args[i];
+		if (arg.type == 0)
+		{
+			if (arg.arg.type == TemplateParameterType::TEMPLATE_TYPE)
+			{
+				TemplateArgument injectedArg;
+				injectedArg.type = TemplateParameterType::TYPE;
+				uint32 index = InstantiateTemplateGetIndex(program, arg.arg.templateTypeName);
+				injectedArg.value = instantiation.args[index].value;
+				injectedArg.pointerLevel = instantiation.args[index].pointerLevel;
+				result.args.push_back(injectedArg);
+			}
+			else if (arg.arg.type == TemplateParameterType::INT)
+			{
+				if (!arg.arg.templateTypeName.empty())
+				{
+					TemplateArgument injectedArg;
+					injectedArg.type = TemplateParameterType::INT;
+					uint32 index = InstantiateTemplateGetIndex(program, arg.arg.templateTypeName);
+					injectedArg.value = instantiation.args[index].value;
+					result.args.push_back(injectedArg);
+				}
+				else
+				{
+					result.args.push_back(arg.arg);
+				}
+			}
+			else
+			{
+				result.args.push_back(arg.arg);
+			}
+		}
+		else if (arg.type == 1)
+		{
+			TemplateArgument injectedArg;
+			injectedArg.type = TemplateParameterType::TYPE;
+			injectedArg.value = ExecuteInstantiationCommand(program, arg.command, instantiation);
+			injectedArg.pointerLevel = 0;
+			result.args.push_back(injectedArg);
+		}
+	}
+
+	Class* cls = program->GetClass(command->type);
+	uint16 type = cls->InstantiateTemplate(program, result);
+	return type;
+}
+
+void Class::BuildVTable()
+{
+	VTable* vtable = new VTable();
+
+	if (HasBaseClass())
+		*vtable = *m_BaseClass->GetVTable();
+
+	for (uint32 i = 0; i < m_FunctionMap.size(); i++)
+	{
+		Function* function = m_FunctionMap[i];
+		if (!function->isVirtual)
+			continue;
+
+		int32 overrideIndex = -1;
+		if (HasBaseClass())
+		{
+			std::vector<TypeInfo> parameters;
+			for (uint32 j = 0; j < function->parameters.size(); j++)
+				parameters.push_back(function->parameters[j].type);
+
+			overrideIndex = m_BaseClass->GetVTable()->FindSlot(function->name, parameters);
+		}
+
+		if (overrideIndex >= 0)
+		{
+			// Replace base function
+			vtable->functions[overrideIndex] = function;
+		}
+		else
+		{
+			// New virtual entry
+			vtable->functions.push_back(function);
+		}
+	}
+
+	m_VTable = vtable;
+}
+
+static std::string GetPrimitiveTypeName(ValueType type)
+{
+	switch (type)
+	{
+	case ValueType::UINT8:   return "uint8";
+	case ValueType::UINT16:  return "uint16";
+	case ValueType::UINT32:  return "uint32";
+	case ValueType::UINT64:  return "uint64";
+
+	case ValueType::INT8:    return "int8";
+	case ValueType::INT16:   return "int16";
+	case ValueType::INT32:   return "int32";
+	case ValueType::INT64:   return "int64";
+
+	case ValueType::REAL32:  return "real32";
+	case ValueType::REAL64:  return "real64";
+
+	case ValueType::BOOL:    return "bool";
+	case ValueType::CHAR:    return "char";
+	case ValueType::VOID_T:  return "void";
+
+	default:                 return "unknown";
+	}
+}
+
+std::string Class::GenerateTemplateClassName(Program* program, const std::string& className, const TemplateInstantiation& instantiation)
+{
+	std::string name = className + "<";
+	for (uint32 i = 0; i < instantiation.args.size(); i++)
+	{
+		const TemplateArgument& arg = instantiation.args[i];
+		if (arg.type == TemplateParameterType::TYPE)
+		{
+			name += "Type=";
+			if (Value::IsPrimitiveType(arg.value))
+				name += GetPrimitiveTypeName((ValueType)arg.value);
+			else
+				name += program->GetClass(arg.value)->GetName();
+		}
+		else if (arg.type == TemplateParameterType::INT)
+		{
+			name += "Int=";
+			name += std::to_string(arg.value);
+		}
+
+		if ((i + 1) < instantiation.args.size())
+		{
+			name += ",";
+		}
+	}
+
+	name += ">";
+
+	return name;
 }

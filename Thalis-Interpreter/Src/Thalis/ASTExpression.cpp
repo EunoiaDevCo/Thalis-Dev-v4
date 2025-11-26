@@ -48,6 +48,11 @@ TypeInfo ASTExpressionLiteral::GetTypeInfo(Program* program)
 	return TypeInfo(value.type, value.pointerLevel);
 }
 
+ASTExpression* ASTExpressionLiteral::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionLiteral(value);
+}
+
 void ASTExpressionConstUInt32::EmitCode(Program* program)
 {
 	program->AddPushConstantUInt32Command(value);
@@ -56,6 +61,11 @@ void ASTExpressionConstUInt32::EmitCode(Program* program)
 TypeInfo ASTExpressionConstUInt32::GetTypeInfo(Program* program)
 {
 	return TypeInfo((uint16)ValueType::UINT32, 0);
+}
+
+ASTExpression* ASTExpressionConstUInt32::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionConstUInt32(value);
 }
 
 void ASTExpressionModuleFunctionCall::EmitCode(Program* program)
@@ -71,6 +81,15 @@ void ASTExpressionModuleFunctionCall::EmitCode(Program* program)
 TypeInfo ASTExpressionModuleFunctionCall::GetTypeInfo(Program* program)
 {
 	return Module::GetFunctionReturnInfo(moduleID, functionID);
+}
+
+ASTExpression* ASTExpressionModuleFunctionCall::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	std::vector<ASTExpression*> injectedArgExprs;
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		injectedArgExprs.push_back(argExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionModuleFunctionCall(moduleID, functionID, injectedArgExprs);
 }
 
 void ASTExpressionDeclarePrimitive::EmitCode(Program* program)
@@ -106,6 +125,12 @@ TypeInfo ASTExpressionDeclarePrimitive::GetTypeInfo(Program* program)
 	return TypeInfo((uint16)type, 0);
 }
 
+ASTExpression* ASTExpressionDeclarePrimitive::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedAssignExpr = assignExpr ? assignExpr->InjectTemplateType(program, cls, instantiation, templatedClass) : nullptr;
+	return new ASTExpressionDeclarePrimitive(type, slot, injectedAssignExpr);
+}
+
 void ASTExpressionPushLocal::EmitCode(Program* program)
 {
 	program->AddPushLocalCommand(slot);
@@ -114,6 +139,28 @@ void ASTExpressionPushLocal::EmitCode(Program* program)
 TypeInfo ASTExpressionPushLocal::GetTypeInfo(Program* program)
 {
 	return typeInfo;
+}
+
+ASTExpression* ASTExpressionPushLocal::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	TypeInfo injectedTypeInfo = typeInfo;
+	
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedTypeInfo.pointerLevel = typeInfo.pointerLevel + instantiation.args[index].pointerLevel;
+		injectedTypeInfo.type = instantiation.args[index].value;
+	}
+
+	if (instantiationCommand)
+	{
+		injectedTypeInfo.type = cls->ExecuteInstantiationCommand(program, instantiationCommand, instantiation);
+	}
+
+	if (slot == INVALID_ID)
+		uint32 bp = 0;
+
+	return new ASTExpressionPushLocal(slot, injectedTypeInfo, "");
 }
 
 void ASTExpressionDeclarePointer::EmitCode(Program* program)
@@ -135,6 +182,26 @@ TypeInfo ASTExpressionDeclarePointer::GetTypeInfo(Program* program)
 	return TypeInfo(type, pointerLevel);
 }
 
+ASTExpression* ASTExpressionDeclarePointer::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	uint8 injectedPointerLevel = pointerLevel;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedPointerLevel += instantiation.args[index].pointerLevel;
+		injectedType = instantiation.args[index].value;
+	}
+
+	if (instantiationCommand)
+	{
+		injectedType = cls->ExecuteInstantiationCommand(program, instantiationCommand, instantiation);
+	}
+
+	ASTExpression* injectedAssignExpr = assignExpr ? assignExpr->InjectTemplateType(program, cls, instantiation, templatedClass) : nullptr;
+	return new ASTExpressionDeclarePointer(injectedType, injectedPointerLevel, slot, injectedAssignExpr);
+}
+
 void ASTExpressionSet::EmitCode(Program* program)
 {
 	assignExpr->EmitCode(program);
@@ -150,13 +217,20 @@ TypeInfo ASTExpressionSet::GetTypeInfo(Program* program)
 bool ASTExpressionSet::Resolve(Program* program)
 {
 	TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
-	if (exprTypeInfo.pointerLevel > 0 || Value::IsPrimitiveType(exprTypeInfo.type)) return true;
+	if (exprTypeInfo.pointerLevel > 0 || Value::IsPrimitiveType(exprTypeInfo.type) || exprTypeInfo.type == INVALID_ID) return true;
 
 	Class* cls = program->GetClass(exprTypeInfo.type);
 	std::vector<ASTExpression*> argExprs;
 	argExprs.push_back(assignExpr);
 	assignFunctionID = cls->GetFunctionID("operator=", argExprs);
 	return true;
+}
+
+ASTExpression* ASTExpressionSet::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	ASTExpression* injectedAssignExpr = assignExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionSet(injectedExpr, injectedAssignExpr);
 }
 
 void ASTExpressionAddressOf::EmitCode(Program* program)
@@ -173,6 +247,12 @@ TypeInfo ASTExpressionAddressOf::GetTypeInfo(Program* program)
 	return typeInfo;
 }
 
+ASTExpression* ASTExpressionAddressOf::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionAddressOf(injectedExpr);
+}
+
 void ASTExpressionDereference::EmitCode(Program* program)
 {
 	if (isStatement) return;
@@ -187,6 +267,12 @@ TypeInfo ASTExpressionDereference::GetTypeInfo(Program* program)
 	return typeInfo;
 }
 
+ASTExpression* ASTExpressionDereference::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionDereference(injectedExpr);
+}
+
 void ASTExpressionStackArrayDeclare::EmitCode(Program* program)
 {
 	for (int32 i = initializerExprs.size() - 1; i >= 0; i--)
@@ -194,12 +280,49 @@ void ASTExpressionStackArrayDeclare::EmitCode(Program* program)
 		initializerExprs[i]->EmitCode(program);
 	}
 
-	program->AddDeclareStackArrayCommand(type, elementPointerLevel, dimensions.data(), dimensions.size(), initializerExprs.size(), slot);
+	std::vector<uint32> dims;
+	for (uint32 i = 0; i < dimensions.size(); i++)
+		dims.push_back(dimensions[i].first);
+
+	program->AddDeclareStackArrayCommand(type, elementPointerLevel, dims.data(), dims.size(), initializerExprs.size(), slot);
 }
 
 TypeInfo ASTExpressionStackArrayDeclare::GetTypeInfo(Program* program)
 {
 	return TypeInfo(type, 1);
+}
+
+ASTExpression* ASTExpressionStackArrayDeclare::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	uint8 injectedPointerLevel = elementPointerLevel;
+
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+		injectedPointerLevel += instantiation.args[index].pointerLevel;
+	}
+
+	std::vector<std::pair<uint32, std::string>> injectedDimensions;
+	for (uint32 i = 0; i < dimensions.size(); i++)
+	{
+		if (dimensions[i].second.empty())
+		{
+			injectedDimensions.push_back(dimensions[i]);
+		}
+		else
+		{
+			uint32 index = cls->InstantiateTemplateGetIndex(program, dimensions[i].second);
+			injectedDimensions.push_back(std::make_pair(instantiation.args[index].value, ""));
+		}
+	}
+
+	std::vector<ASTExpression*> injectedInitialzeExprs;
+	for (uint32 i = 0; i < initializerExprs.size(); i++)
+		injectedInitialzeExprs.push_back(initializerExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionStackArrayDeclare(injectedType, injectedPointerLevel, slot, injectedDimensions, injectedInitialzeExprs, "");
 }
 
 void ASTExpressionPushIndex::EmitCode(Program* program)
@@ -210,7 +333,7 @@ void ASTExpressionPushIndex::EmitCode(Program* program)
 	for (int32 i = indexExprs.size() - 1; i >= 0; i--)
 		indexExprs[i]->EmitCode(program);
 
-	program->AddPushIndexedCommand(program->GetTypeSize(typeInfo.type), indexExprs.size());
+	program->AddPushIndexedCommand(program->GetTypeSize(typeInfo.type), indexExprs.size(), indexFunctionID, typeInfo.type);
 }
 
 TypeInfo ASTExpressionPushIndex::GetTypeInfo(Program* program)
@@ -218,6 +341,25 @@ TypeInfo ASTExpressionPushIndex::GetTypeInfo(Program* program)
 	TypeInfo typeInfo = expr->GetTypeInfo(program);
 	typeInfo.pointerLevel--;
 	return typeInfo;
+}
+
+ASTExpression* ASTExpressionPushIndex::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	std::vector<ASTExpression*> injectedIndexExprs;
+	for (uint32 i = 0; i < indexExprs.size(); i++)
+		injectedIndexExprs.push_back(indexExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionPushIndex(injectedExpr, injectedIndexExprs);
+}
+
+bool ASTExpressionPushIndex::Resolve(Program* program)
+{
+	TypeInfo typeInfo = expr->GetTypeInfo(program);
+	if (Value::IsPrimitiveType(typeInfo.type) || typeInfo.pointerLevel > 0) return true;
+
+	Class* cls = program->GetClass(typeInfo.type);
+	indexFunctionID = cls->GetFunctionID("operator[]", indexExprs);
 }
 
 void ASTExpressionBinary::EmitCode(Program* program)
@@ -279,6 +421,9 @@ TypeInfo ASTExpressionBinary::GetTypeInfo(Program* program)
 bool ASTExpressionBinary::Resolve(Program* program)
 {
 	TypeInfo lhsType = lhs->GetTypeInfo(program);
+
+	if (lhsType.type == INVALID_ID) return true;
+
 	if (Value::IsPrimitiveType(lhsType.type)) return true;
 	if (lhsType.pointerLevel > 0) return true;
 
@@ -302,6 +447,13 @@ bool ASTExpressionBinary::Resolve(Program* program)
 	}
 
 	return true;
+}
+
+ASTExpression* ASTExpressionBinary::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedLHS = lhs->InjectTemplateType(program, cls, instantiation, templatedClass);
+	ASTExpression* injectedRHS = rhs->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionBinary(injectedLHS, injectedRHS, op);
 }
 
 void ASTExpressionIfElse::EmitCode(Program* program)
@@ -343,6 +495,21 @@ void ASTExpressionIfElse::EmitCode(Program* program)
 TypeInfo ASTExpressionIfElse::GetTypeInfo(Program* program)
 {
 	return TypeInfo(INVALID_ID, 0);
+}
+
+ASTExpression* ASTExpressionIfElse::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedConditionExpr = conditionExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	std::vector<ASTExpression*> injectedIfExprs;
+	std::vector<ASTExpression*> injectedElseExprs;
+
+	for (uint32 i = 0; i < ifExprs.size(); i++)
+		injectedIfExprs.push_back(ifExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	for (uint32 i = 0; i < elseExprs.size(); i++)
+		injectedElseExprs.push_back(elseExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionIfElse(injectedConditionExpr, pushIfScope, pushElseScope, injectedIfExprs, injectedElseExprs);
 }
 
 void ASTExpressionFor::EmitCode(Program* program)
@@ -388,6 +555,19 @@ TypeInfo ASTExpressionFor::GetTypeInfo(Program* program)
 	return TypeInfo(INVALID_ID, 0);
 }
 
+ASTExpression* ASTExpressionFor::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedDeclareExpr = declareExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	ASTExpression* injectedConditionExpr = conditionExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	ASTExpression* injectedIncrExpr = incrExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+
+	std::vector<ASTExpression*> injectedForExprs;
+	for (uint32 i = 0; i < forExprs.size(); i++)
+		injectedForExprs.push_back(forExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionFor(injectedDeclareExpr, injectedConditionExpr, injectedIncrExpr, injectedForExprs);
+}
+
 void ASTExpressionUnaryUpdate::EmitCode(Program* program)
 {
 	expr->EmitCode(program);
@@ -397,6 +577,12 @@ void ASTExpressionUnaryUpdate::EmitCode(Program* program)
 TypeInfo ASTExpressionUnaryUpdate::GetTypeInfo(Program* program)
 {
 	return expr->GetTypeInfo(program);
+}
+
+ASTExpression* ASTExpressionUnaryUpdate::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionUnaryUpdate(injectedExpr, op);
 }
 
 void ASTExpressionWhile::EmitCode(Program* program)
@@ -429,6 +615,16 @@ TypeInfo ASTExpressionWhile::GetTypeInfo(Program* program)
 	return TypeInfo(INVALID_ID, 0);
 }
 
+ASTExpression* ASTExpressionWhile::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedConditionExpr = conditionExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	std::vector<ASTExpression*> injectedWhileExprs;
+	for (uint32 i = 0; i < whileExprs.size(); i++)
+		injectedWhileExprs.push_back(whileExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionWhile(injectedConditionExpr, injectedWhileExprs);
+}
+
 void ASTExpressionBreak::EmitCode(Program* program)
 {
 	program->WriteOPCode(OpCode::BREAK);
@@ -439,6 +635,11 @@ TypeInfo ASTExpressionBreak::GetTypeInfo(Program* program)
 	return TypeInfo(INVALID_ID, 0);
 }
 
+ASTExpression* ASTExpressionBreak::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionBreak();
+}
+
 void ASTExpressionContinue::EmitCode(Program* program)
 {
 	program->WriteOPCode(OpCode::CONTINUE);
@@ -447,6 +648,11 @@ void ASTExpressionContinue::EmitCode(Program* program)
 TypeInfo ASTExpressionContinue::GetTypeInfo(Program* program)
 {
 	return TypeInfo(INVALID_ID, 0);
+}
+
+ASTExpression* ASTExpressionContinue::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionContinue();
 }
 
 void ASTExpressionStaticFunctionCall::EmitCode(Program* program)
@@ -467,6 +673,15 @@ bool ASTExpressionStaticFunctionCall::Resolve(Program* program)
 {
 	functionID = functionID == INVALID_ID ? program->GetClass(classID)->GetFunctionID(functionName, argExprs) : functionID;
 	return true;
+}
+
+ASTExpression* ASTExpressionStaticFunctionCall::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	std::vector<ASTExpression*> injectedArgExprs;
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		injectedArgExprs.push_back(argExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionStaticFunctionCall(templatedClass->GetID(), functionName, argExprs);
 }
 
 void ASTExpressionReturn::EmitCode(Program* program)
@@ -496,6 +711,12 @@ TypeInfo ASTExpressionReturn::GetTypeInfo(Program* program)
 	return expr->GetTypeInfo(program);
 }
 
+ASTExpression* ASTExpressionReturn::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr ? expr->InjectTemplateType(program, cls, instantiation, templatedClass) : nullptr;
+	return new ASTExpressionReturn(injectedExpr, returnsReference);
+}
+
 void ASTExpressionStaticVariable::EmitCode(Program* program)
 {
 	if (isStatement) return;
@@ -516,6 +737,11 @@ bool ASTExpressionStaticVariable::Resolve(Program* program)
 	return offset != UINT64_MAX;
 }
 
+ASTExpression* ASTExpressionStaticVariable::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionStaticVariable(classID, offset, typeInfo, isArray);
+}
+
 void ASTExpressionModuleConstant::EmitCode(Program* program)
 {
 	if (isStatement) return;
@@ -525,6 +751,11 @@ void ASTExpressionModuleConstant::EmitCode(Program* program)
 TypeInfo ASTExpressionModuleConstant::GetTypeInfo(Program* program)
 {
 	return Module::GetConstantTypeInfo(moduleID, constantID);
+}
+
+ASTExpression* ASTExpressionModuleConstant::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionModuleConstant(moduleID, constantID);
 }
 
 void ASTExpressionDeclareObjectWithConstructor::EmitCode(Program* program)
@@ -542,9 +773,32 @@ TypeInfo ASTExpressionDeclareObjectWithConstructor::GetTypeInfo(Program* program
 
 bool ASTExpressionDeclareObjectWithConstructor::Resolve(Program* program)
 {
+	if (type == (uint16)ValueType::TEMPLATE_TYPE) return true;
+
 	Class* cls = program->GetClass(type);
 	functionID = cls->GetFunctionID(cls->GetName(), argExprs);
 	return true;
+}
+
+ASTExpression* ASTExpressionDeclareObjectWithConstructor::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+	}
+
+	if (instantiationCommand)
+	{
+		injectedType = cls->ExecuteInstantiationCommand(program, instantiationCommand, instantiation);
+	}
+
+	std::vector<ASTExpression*> injectedArgExprs;
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		injectedArgExprs.push_back(argExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionDeclareObjectWithConstructor(injectedType, injectedArgExprs, slot, "");
 }
 
 void ASTExpressionDeclareObjectWithAssign::EmitCode(Program* program)
@@ -560,6 +814,8 @@ TypeInfo ASTExpressionDeclareObjectWithAssign::GetTypeInfo(Program* program)
 
 bool ASTExpressionDeclareObjectWithAssign::Resolve(Program* program)
 {
+	if (type == (uint16)ValueType::TEMPLATE_TYPE)
+		return true;
 	Class* cls = program->GetClass(type);
 	std::vector<ASTExpression*> argExprs;
 	argExprs.push_back(assignExpr);
@@ -567,11 +823,39 @@ bool ASTExpressionDeclareObjectWithAssign::Resolve(Program* program)
 	return true;
 }
 
+ASTExpression* ASTExpressionDeclareObjectWithAssign::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	uint8 injectedPointerLevel = 0;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+		injectedPointerLevel = instantiation.args[index].value;
+	}
+
+	if (instantiationCommand)
+	{
+		injectedType = cls->ExecuteInstantiationCommand(program, instantiationCommand, instantiation);
+	}
+
+	ASTExpression* injectedAssignExpr = assignExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	if (injectedPointerLevel > 0)
+	{
+		return new ASTExpressionDeclarePointer(injectedType, injectedPointerLevel, slot, injectedAssignExpr, "");
+	}
+
+	return new ASTExpressionDeclareObjectWithAssign(injectedType, slot, injectedAssignExpr, "");
+}
+
 void ASTExpressionPushMember::EmitCode(Program* program)
 {
 	if (isStatement) return;
 
 	expr->EmitCode(program);
+
+	if (typeInfo.type == INVALID_ID)
+		uint32 bp = 0;
 
 	program->AddPushMemberCommand(typeInfo.type, typeInfo.pointerLevel, offset, false, isArray);
 }
@@ -581,7 +865,13 @@ TypeInfo ASTExpressionPushMember::GetTypeInfo(Program* program)
 	if (!members.empty())
 	{
 		TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
-		offset = program->GetClass(exprTypeInfo.type)->CalculateMemberOffset(program, members, &typeInfo, &isArray);
+		if (exprTypeInfo.type == (uint16)ValueType::TEMPLATE_TYPE)
+			return TypeInfo((uint16)ValueType::TEMPLATE_TYPE, 0);
+		if(exprTypeInfo.type == INVALID_ID)
+			return TypeInfo(INVALID_ID, 0);
+
+		Class* cls = program->GetClass(exprTypeInfo.derivedType);
+		offset = cls->CalculateMemberOffset(program, members, &typeInfo, &isArray);
 	}
 	return typeInfo;
 }
@@ -591,9 +881,27 @@ bool ASTExpressionPushMember::Resolve(Program* program)
 	if(!members.empty())
 	{
 		TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
-		offset = program->GetClass(exprTypeInfo.type)->CalculateMemberOffset(program, members, &typeInfo, &isArray);
+		if (exprTypeInfo.type == (uint16)ValueType::TEMPLATE_TYPE)
+			return true;
+		if (exprTypeInfo.type == INVALID_ID) return true;
+
+		Class* cls = program->GetClass(exprTypeInfo.derivedType);
+		offset = cls->CalculateMemberOffset(program, members, &typeInfo, &isArray);
+		uint32 bp = 0;
+
+		if (typeInfo.type == (uint16)ValueType::TEMPLATE_TYPE)
+		{
+			uint32 bp = 0;
+		}
+
 	}
 	return offset != UINT64_MAX;
+}
+
+ASTExpression* ASTExpressionPushMember::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionPushMember(injectedExpr, members);
 }
 
 void ASTExpressionMemberFunctionCall::EmitCode(Program* program)
@@ -606,23 +914,64 @@ void ASTExpressionMemberFunctionCall::EmitCode(Program* program)
 	if (objTypeInfo.pointerLevel == 1) 
 		program->WriteOPCode(OpCode::DEREFERENCE);
 
-	program->AddMemberFunctionCallCommand(objTypeInfo.type, functionID, !isStatement);
+	if (isVirtual)
+	{
+		program->AddVirtualFunctionCallCommand(functionID, !isStatement);
+	}
+	else
+	{
+		program->AddMemberFunctionCallCommand(objTypeInfo.type, functionID, !isStatement);
+	}
 }
 
 TypeInfo ASTExpressionMemberFunctionCall::GetTypeInfo(Program* program)
 {
 	TypeInfo objTypeInfo = objExpr->GetTypeInfo(program);
+	if (objTypeInfo.type == INVALID_ID)
+		return TypeInfo(INVALID_ID, 0);
+	if (objTypeInfo.type == (uint16)ValueType::TEMPLATE_TYPE) 
+		return TypeInfo((uint16)ValueType::TEMPLATE_TYPE, 0);
+
 	Class* objClass = program->GetClass(objTypeInfo.type);
-	functionID = (functionID == INVALID_ID) ? objClass->GetFunctionID(functionName, argExprs) : functionID;
-	return objClass->GetFunction(functionID)->returnInfo;
+	uint16 fid = (functionID == INVALID_ID) ? objClass->GetFunctionID(functionName, argExprs) : functionID;
+	TypeInfo returnInfo = objClass->GetFunction(functionID)->returnInfo;
+	if (!isVirtual)
+		functionID = fid;
+
+	return returnInfo;
 }
 
 bool ASTExpressionMemberFunctionCall::Resolve(Program* program)
 {
 	TypeInfo objTypeInfo = objExpr->GetTypeInfo(program);
+	if (objTypeInfo.type == INVALID_ID) return true;
+	if(objTypeInfo.type == (uint16)ValueType::TEMPLATE_TYPE) return true;
+
 	Class* objClass = program->GetClass(objTypeInfo.type);
 	functionID = (functionID == INVALID_ID) ? objClass->GetFunctionID(functionName, argExprs) : functionID;
+	if(functionID != INVALID_ID)
+	{
+		isVirtual = objClass->GetFunction(functionID)->isVirtual;
+		if (isVirtual)
+		{
+			std::vector<TypeInfo> parameters;
+			for (uint32 i = 0; i < argExprs.size(); i++)
+				parameters.push_back(argExprs[i]->GetTypeInfo(program));
+			functionID = objClass->GetVTable()->FindSlot(functionName, parameters);
+		}
+	}
+
 	return true;
+}
+
+ASTExpression* ASTExpressionMemberFunctionCall::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedObjExpr = objExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	std::vector<ASTExpression*> injectedArgExprs;
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		injectedArgExprs.push_back(argExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionMemberFunctionCall(injectedObjExpr, functionName, injectedArgExprs);
 }
 
 void ASTExpressionThis::EmitCode(Program* program)
@@ -636,14 +985,15 @@ TypeInfo ASTExpressionThis::GetTypeInfo(Program* program)
 	return TypeInfo(classID, 1);
 }
 
+ASTExpression* ASTExpressionThis::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionThis(templatedClass->GetID());
+}
+
 void ASTExpressionDeclareReference::EmitCode(Program* program)
 {
 	TypeInfo assignTypeInfo = assignExpr->GetTypeInfo(program);
-	if (assignTypeInfo.type != type || assignTypeInfo.pointerLevel != pointerLevel)
-	{
-		return;
-	}
-
+	
 	assignExpr->EmitCode(program);
 	program->AddDeclareReferenceCommand(slot);
 }
@@ -651,6 +1001,26 @@ void ASTExpressionDeclareReference::EmitCode(Program* program)
 TypeInfo ASTExpressionDeclareReference::GetTypeInfo(Program* program)
 {
 	return TypeInfo(type, pointerLevel);
+}
+
+ASTExpression* ASTExpressionDeclareReference::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	uint8 injectedPointerLevel = pointerLevel;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+		injectedPointerLevel += instantiation.args[index].pointerLevel;
+	}
+
+	if (instantiationCommand)
+	{
+		injectedType = cls->ExecuteInstantiationCommand(program, instantiationCommand, instantiation);
+	}
+
+	ASTExpression* injectedAssignExpr = assignExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionDeclareReference(injectedType, injectedPointerLevel, injectedAssignExpr, slot, "");
 }
 
 void ASTExpressionConstructorCall::EmitCode(Program* program)
@@ -668,9 +1038,31 @@ TypeInfo ASTExpressionConstructorCall::GetTypeInfo(Program* program)
 
 bool ASTExpressionConstructorCall::Resolve(Program* program)
 {
+	if (type == (uint16)ValueType::TEMPLATE_TYPE) return true;
 	Class* cls = program->GetClass(type);
 	functionID = cls->GetFunctionID(cls->GetName(), argExprs);
 	return functionID != INVALID_ID;
+}
+
+ASTExpression* ASTExpressionConstructorCall::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+	}
+
+	if (instantiationCommand != nullptr)
+	{
+		injectedType = cls->ExecuteInstantiationCommand(program, instantiationCommand, instantiation);
+	}
+
+	std::vector<ASTExpression*> injectedArgExprs;
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		injectedArgExprs.push_back(argExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionConstructorCall(injectedType, injectedArgExprs, "");
 }
 
 void ASTExpressionNew::EmitCode(Program* program)
@@ -693,6 +1085,22 @@ bool ASTExpressionNew::Resolve(Program* program)
 	return true;
 }
 
+ASTExpression* ASTExpressionNew::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+	}
+
+	std::vector<ASTExpression*> injectedArgExprs;
+	for (uint32 i = 0; i < argExprs.size(); i++)
+		injectedArgExprs.push_back(argExprs[i]->InjectTemplateType(program, cls, instantiation, templatedClass));
+
+	return new ASTExpressionNew(injectedType, injectedArgExprs, "");
+}
+
 void ASTExpressionDelete::EmitCode(Program* program)
 {
 	expr->EmitCode(program);
@@ -705,6 +1113,12 @@ TypeInfo ASTExpressionDelete::GetTypeInfo(Program* program)
 	return TypeInfo(INVALID_ID, 0);
 }
 
+ASTExpression* ASTExpressionDelete::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionDelete(injectedExpr, deleteArray);
+}
+
 void ASTExpressionNewArray::EmitCode(Program* program)
 {
 	sizeExpr->EmitCode(program);
@@ -714,4 +1128,20 @@ void ASTExpressionNewArray::EmitCode(Program* program)
 TypeInfo ASTExpressionNewArray::GetTypeInfo(Program* program)
 {
 	return TypeInfo(type, pointerLevel + 1);
+}
+
+ASTExpression* ASTExpressionNewArray::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	uint8 injectedPointerLevel = pointerLevel;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+		injectedPointerLevel += instantiation.args[index].pointerLevel;
+	}
+
+	ASTExpression* injectedSizeExpr = sizeExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+
+	return new ASTExpressionNewArray(injectedType, injectedPointerLevel, injectedSizeExpr, "");
 }

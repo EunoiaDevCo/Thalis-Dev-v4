@@ -27,4 +27,5 @@ int main()
 	std::cout << "Stack size: " << program.GetStackSize() << std::endl;
 	std::cout << "Scope stack size: " << program.GetScopeStackSize() << std::endl;
 	std::cout << "Loop stack size: " << program.GetLoopStackSize() << std::endl;
+	std::cout << "Code size: " << program.GetCodeSize() << std::endl;
 }

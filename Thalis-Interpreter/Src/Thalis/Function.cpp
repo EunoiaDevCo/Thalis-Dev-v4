@@ -30,6 +30,8 @@ std::string Function::GenerateSignatureFromArgs(Program* program, const std::str
 	for (uint32 i = 0; i < args.size(); i++)
 	{
 		TypeInfo typeInfo = args[i]->GetTypeInfo(program);
+		if (typeInfo.type == INVALID_ID)
+			return signature;
 		std::string typeName = program->GetTypeName(typeInfo.type);
 
 		if (typeInfo.pointerLevel > 0)
