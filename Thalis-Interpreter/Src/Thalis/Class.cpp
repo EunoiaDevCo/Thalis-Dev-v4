@@ -46,18 +46,33 @@ Function* Class::GetFunction(uint16 id)
 	return m_FunctionMap[id];
 }
 
-static int32 GetConversionScore(Program* program, const TypeInfo& from, const TypeInfo& to)
+static int32 GetConversionScore(Program* program, const TypeInfo& from, const TypeInfo& to, uint16* castFunctionID, bool checkParamConversion)
 {
-	if (from.pointerLevel != to.pointerLevel)
-		return -1; // pointer mismatch not allowed
-
 	if (from.type == to.type)
 		return 0; // exact match
 
 	if (!Value::IsPrimitiveType(from.type) && !Value::IsPrimitiveType(to.type))
 	{
-		
+		Class* fromClass = program->GetClass(from.type);
+		if (fromClass->InheritsFrom(to.type)) return 1;
 	}
+
+	*castFunctionID = INVALID_ID;
+
+	if (!Value::IsPrimitiveType(to.type) && to.pointerLevel == 0 && checkParamConversion)
+	{
+		Class* toClass = program->GetClass(to.type);
+		std::vector<ASTExpression*> args;
+		args.push_back(new ASTExpressionDummy(from));
+		std::vector<uint16> cf;
+		uint16 functionID = toClass->GetFunctionID(toClass->GetName(), args, cf);
+		if (functionID == INVALID_ID) return -1;
+		*castFunctionID = functionID;
+		return 2;
+	}
+
+	if (from.pointerLevel != to.pointerLevel)
+		return -1; // pointer mismatch not allowed
 
 	bool fromIsInt = Value::IsIntegerType(from.type);
 	bool toIsInt = Value::IsIntegerType(to.type);
@@ -94,15 +109,20 @@ static int32 GetConversionScore(Program* program, const TypeInfo& from, const Ty
 	return -1; // incompatible
 }
 
-uint16 Class::GetFunctionID(const std::string& name, const std::vector<ASTExpression*>& args)
+uint16 Class::GetFunctionID(const std::string& name, const std::vector<ASTExpression*>& args, std::vector<uint16>& castFunctionIDs, bool checkParamConversion)
 {
+	castFunctionIDs.clear();
 	Program* program = Program::GetCompiledProgram();
 
 	// First try exact signature match
 	std::string exactSignature = Function::GenerateSignatureFromArgs(program, name, args);
 	auto it = m_FunctionDefinitionMap.find(exactSignature);
 	if (it != m_FunctionDefinitionMap.end())
+	{
+		for (uint32 i = 0; i < args.size(); i++)
+			castFunctionIDs.push_back(INVALID_ID);
 		return it->second;
+	}
 
 	Function* bestFunc = nullptr;
 	uint32 bestID = INVALID_ID;
@@ -111,6 +131,8 @@ uint16 Class::GetFunctionID(const std::string& name, const std::vector<ASTExpres
 	// Now try to find the best compatible function
 	for (const auto& [sig, id] : m_FunctionDefinitionMap)
 	{
+		std::vector<uint16> argCastFunctionIDs;
+
 		// Check if signature starts with "<name>-"
 		if (sig.rfind(name + "-", 0) != 0)
 			continue;
@@ -119,7 +141,7 @@ uint16 Class::GetFunctionID(const std::string& name, const std::vector<ASTExpres
 		if (!func || func->parameters.size() != args.size())
 			continue;
 
-		int totalScore = 0;
+		int32 totalScore = 0;
 		bool compatible = true;
 
 		for (size_t i = 0; i < args.size(); ++i)
@@ -128,9 +150,11 @@ uint16 Class::GetFunctionID(const std::string& name, const std::vector<ASTExpres
 			TypeInfo argType = arg->GetTypeInfo(program);
 			const FunctionParameter& param = func->parameters[i];
 
-			int score = GetConversionScore(program, argType, param.type);
+			uint16 castFunctionID = INVALID_ID;
+			int score = GetConversionScore(program, argType, param.type, &castFunctionID, checkParamConversion);
 			if (score < 0) { compatible = false; break; }
 			totalScore += score;
+			argCastFunctionIDs.push_back(castFunctionID);
 		}
 
 		if (compatible && totalScore < bestScore)
@@ -138,6 +162,7 @@ uint16 Class::GetFunctionID(const std::string& name, const std::vector<ASTExpres
 			bestFunc = func;
 			bestID = id;
 			bestScore = totalScore;
+			castFunctionIDs = argCastFunctionIDs;
 		}
 	}
 
@@ -180,7 +205,6 @@ void Class::AddMemberField(const std::string& name, uint16 type, uint8 pointerLe
 	field.name = name;
 	field.type.type = type;
 	field.type.pointerLevel = pointerLevel;
-	field.type.derivedType = type;
 	field.offset = offset;
 	field.size = size;
 	field.numDimensions = dimensions.size();
@@ -198,7 +222,6 @@ void Class::AddStaticField(const std::string& name, uint16 type, uint8 pointerLe
 	field.name = name;
 	field.type.type = type;
 	field.type.pointerLevel = pointerLevel;
-	field.type.derivedType = type;
 	field.offset = offset;
 	field.size = size;
 	field.initializeExpr = initializeExpr;
@@ -431,6 +454,17 @@ int32 Class::InstantiateTemplateGetIndex(Program* program, const std::string& te
 	}
 
 	return -1;
+}
+
+bool Class::InheritsFrom(uint16 type) const
+{
+	if (HasBaseClass())
+	{
+		if (m_BaseClass->m_ID == type) return true;
+		return m_BaseClass->InheritsFrom(type);
+	}
+
+	return false;
 }
 
 Function* Class::InstantiateTemplateInjectFunction(Program* program, Function* templatedFunction, const std::string& templatedTypeName, const TemplateInstantiation& instantiation, Class* templatedClass)

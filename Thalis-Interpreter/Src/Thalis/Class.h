@@ -39,7 +39,7 @@ public:
 
 	void AddFunction(Function* function);
 	Function* GetFunction(uint16 id);
-	uint16 GetFunctionID(const std::string& name, const std::vector<ASTExpression*>& args);
+	uint16 GetFunctionID(const std::string& name, const std::vector<ASTExpression*>& args, std::vector<uint16>& castFunctionIDs, bool checkParamConversion = true);
 	Function* FindFunctionBySignature(const std::string& signature);
 
 	void AddMemberField(const std::string& name, uint16 type, uint8 pointerLevel, uint64 offset, uint64 size, const std::vector<std::pair<uint32, std::string>>& dimensions, const std::string& templateTypeName, TemplateInstantiationCommand * command = nullptr);
@@ -65,6 +65,8 @@ public:
 	uint16 InstantiateTemplate(Program* program, const TemplateInstantiation& instantiation);
 	//void AddInstantiationCommand(TemplateInstantiationCommand* command);
 	int32 InstantiateTemplateGetIndex(Program* program, const std::string& templateTypeName);
+
+	bool InheritsFrom(uint16 type) const;
 
 	inline bool HasDestructor() const { return m_Destructor != nullptr; }
 	inline bool HasAssignSTFunction() const { return m_AssignSTFunction != nullptr; }

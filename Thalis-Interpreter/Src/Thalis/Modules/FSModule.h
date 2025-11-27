@@ -1,0 +1,29 @@
+#pragma once
+
+#include "../Value.h"
+#include "../TypeInfo.h"
+#include <vector>
+
+enum class FSModuleConstant
+{
+
+};
+
+enum class FSModuleFunction
+{
+	READ_TEXT_FILE, READ_BINARY_FILE,
+	OPEN_FILE, CLOSE_FILE,
+	READ_LINE
+};
+
+class Program;
+class FSModule
+{
+public:
+	static bool Init();
+	static Value CallFunction(Program* program, uint16 function, const std::vector<Value>& args);
+	static Value Constant(Program* program, uint16 constant);
+
+	static TypeInfo GetFunctionReturnInfo(uint16 function);
+	static TypeInfo GetConstantTypeInfo(uint16 constant);
+};

@@ -32,15 +32,18 @@ enum class OpCode
 	LESS, GREATER, LESS_EQUAL, GREATER_EQUAL, EQUALS, NOT_EQUALS,
 	UNARY_UPDATE, NOT, NEGATE, LOGICAL_OR, LOGICAL_AND,
 	PLUS_EQUALS, MINUS_EQUALS, TIMES_EQUALS, DIVIDE_EQUALS,
+	INVERT,
 
 	BREAK, CONTINUE,
 
-	ADDRESS_OF, DEREFERENCE,
+	ADDRESS_OF, DEREFERENCE, CAST,
 
 	SET,
 
 	MODULE_CONSTANT, MEMBER_FUNCTION_CALL, CONSTRUCTOR_CALL, VIRTUAL_FUNCTION_CALL,
 	MODULE_FUNCTION_CALL, STATIC_FUNCTION_CALL, RETURN, NEW, NEW_ARRAY,
+
+	STRLEN,
 
 	DELETE, DELETE_ARRAY,
 
@@ -132,6 +135,8 @@ public:
 	void AddNewCommand(uint16 type, uint16 functionID);
 	void AddNewArrayCommand(uint16 type, uint8 pointerLevel);
 
+	void AddCastCommand(uint16 targetType, uint8 targetPointerLevel);
+
 	void WriteUInt64(uint64 value);
 	void WriteUInt32(uint32 value);
 	void WriteUInt16(uint16 value);
@@ -186,8 +191,9 @@ private:
 	void ExecuteModuleConstant(uint16 moduleID, uint16 constant);
 	void ExecuteAssignFunction(const Value& dstValue, const Value& assignValue, Function* function);
 	void ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Function* function);
+	void ExecuteCastFunction(const Value& dstValue, const Value& srcValue, Function* function);
 
-	void AddFunctionArgsToFrame(Frame* frame, Function* function);
+	void AddFunctionArgsToFrame(Frame* frame, Function* function, bool readCastFunctionID = true);
 
 	void AddDestructorRecursive(const Value& value);
 	void ExecutePendingDestructors(uint32 offset);

@@ -3,6 +3,11 @@
 #include "ASTExpression.h"
 #include "Modules/ModuleID.h"
 #include "Modules/IOModule.h"
+#include "Modules/MathModule.h"
+#include "Modules/WindowModule.h"
+#include "Modules/GLModule.h"
+#include "Modules/FSModule.h"
+#include "Modules/MemModule.h"
 #include "Memory/Memory.h"
 
 static Program* g_CompiledProgram;
@@ -346,6 +351,13 @@ void Program::AddNewArrayCommand(uint16 type, uint8 pointerLevel)
 	WriteUInt8(pointerLevel);
 }
 
+void Program::AddCastCommand(uint16 targetType, uint8 targetPointerLevel)
+{
+	WriteOPCode(OpCode::CAST);
+	WriteUInt16(targetType);
+	WriteUInt8(targetPointerLevel);
+}
+
 void Program::WriteUInt64(uint64 value)
 {
 	uint8* bytes = reinterpret_cast<uint8*>(&value);
@@ -657,7 +669,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 			CallFrame callFrame;
 			callFrame.basePointer = m_Stack.size();
 			callFrame.popThisStack = true;
-			callFrame.returnPC = m_ProgramCounter;
 			callFrame.usesReturnValue = true;
 			callFrame.loopCount = m_LoopStack.size();
 
@@ -667,6 +678,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 			Frame* frame = m_FramePool.Acquire(function->numLocals);
 			AddFunctionArgsToFrame(frame, function);
+
+			callFrame.returnPC = m_ProgramCounter;
 
 			Value objToCallFunctionOn = m_Stack.back(); m_Stack.pop_back();
 			m_ThisStack.push_back(Value::MakePointer(classID, 1, objToCallFunctionOn.data, m_StackAllocator));
@@ -896,7 +909,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 			CallFrame callFrame;
 			callFrame.basePointer = m_Stack.size();
 			callFrame.popThisStack = true;
-			callFrame.returnPC = m_ProgramCounter;
 			callFrame.usesReturnValue = false;
 			callFrame.loopCount = m_LoopStack.size();
 
@@ -906,6 +918,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 			Frame* frame = m_FramePool.Acquire(function->numLocals);
 			AddFunctionArgsToFrame(frame, function);
+
+			callFrame.returnPC = m_ProgramCounter;
 
 			m_CallStack.push_back(callFrame);
 			m_FrameStack.push_back(frame);
@@ -995,7 +1009,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 		CallFrame callFrame;
 		callFrame.basePointer = m_Stack.size();
 		callFrame.popThisStack = false;
-		callFrame.returnPC = m_ProgramCounter;
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
 
@@ -1005,6 +1018,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		Frame* frame = m_FramePool.Acquire(function->numLocals);
 		AddFunctionArgsToFrame(frame, function);
+
+		callFrame.returnPC = m_ProgramCounter;
 
 		m_CallStack.push_back(callFrame);
 		m_FrameStack.push_back(frame);
@@ -1085,7 +1100,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 		CallFrame callFrame;
 		callFrame.basePointer = m_Stack.size();
 		callFrame.popThisStack = true;
-		callFrame.returnPC = m_ProgramCounter;
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
 
@@ -1095,6 +1109,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		Frame* frame = m_FramePool.Acquire(function->numLocals);
 		AddFunctionArgsToFrame(frame, function);
+
+		callFrame.returnPC = m_ProgramCounter;
 
 		m_ThisStack.push_back(Value::MakePointer(classID, 1, objToCallFunctionOn.data, m_StackAllocator));
 
@@ -1116,7 +1132,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 		CallFrame callFrame;
 		callFrame.basePointer = m_Stack.size();
 		callFrame.popThisStack = true;
-		callFrame.returnPC = m_ProgramCounter;
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
 
@@ -1126,6 +1141,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		Frame* frame = m_FramePool.Acquire(function->numLocals);
 		AddFunctionArgsToFrame(frame, function);
+
+		callFrame.returnPC = m_ProgramCounter;
 
 		m_ThisStack.push_back(Value::MakePointer(objToCallFunctionOn.type, 1, objToCallFunctionOn.data, m_StackAllocator));
 
@@ -1147,7 +1164,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 		CallFrame callFrame;
 		callFrame.basePointer = m_Stack.size();
 		callFrame.popThisStack = true;
-		callFrame.returnPC = m_ProgramCounter;
 		callFrame.usesReturnValue = false;
 		callFrame.loopCount = m_LoopStack.size();
 
@@ -1157,6 +1173,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		Frame* frame = m_FramePool.Acquire(function->numLocals);
 		AddFunctionArgsToFrame(frame, function);
+
+		callFrame.returnPC = m_ProgramCounter;
 
 		m_ThisStack.push_back(Value::MakePointer(type, 1, object.data, m_StackAllocator));
 
@@ -1475,7 +1493,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 			CallFrame callFrame;
 			callFrame.basePointer = m_Stack.size();
 			callFrame.popThisStack = true;
-			callFrame.returnPC = m_ProgramCounter;
 			callFrame.usesReturnValue = false;
 			callFrame.loopCount = m_LoopStack.size();
 
@@ -1485,6 +1502,8 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 			Frame* frame = m_FramePool.Acquire(function->numLocals);
 			AddFunctionArgsToFrame(frame, function);
+
+			callFrame.returnPC = m_ProgramCounter;
 
 			m_ThisStack.push_back(pointer);
 
@@ -1547,6 +1566,33 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		m_HeapAllocator->Free(arrayHeader);
 	} break;
+	case OpCode::CAST: {
+		uint16 targetType = ReadUInt16();
+		uint8 targetPointerLevel = ReadUInt8();
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
+
+		value = value.CastTo(this, targetType, targetPointerLevel, m_StackAllocator);
+		m_Stack.push_back(value);
+	} break;
+	case OpCode::NEGATE: {
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
+		value = value.Negate(m_StackAllocator);
+		m_Stack.push_back(value);
+	} break;
+	case OpCode::INVERT: {
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
+		value = value.Invert(m_StackAllocator);
+		m_Stack.push_back(value);
+	} break;
+	case OpCode::STRLEN: {
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
+		uint32 length = strlen(value.GetCString());
+		m_Stack.push_back(Value::MakeUInt32(length, m_StackAllocator));
+	} break;
 	}
 }
 
@@ -1556,6 +1602,11 @@ void Program::ExecuteModuleFunctionCall(uint16 moduleID, uint16 function, bool u
 	switch (moduleID)
 	{
 	case IO_MODULE_ID: value = IOModule::CallFunction(this, function, m_ArgStorage); break;
+	case MATH_MODULE_ID: value = MathModule::CallFunction(this, function, m_ArgStorage); break;
+	case WINDOW_MODULE_ID: value = WindowModule::CallFunction(this, function, m_ArgStorage); break;
+	case GL_MODULE_ID: value = GLModule::CallFunction(this, function, m_ArgStorage); break;
+	case FS_MODULE_ID: value = FSModule::CallFunction(this, function, m_ArgStorage); break;
+	case MEM_MODULE_ID: value = MemModule::CallFunction(this, function, m_ArgStorage); break;
 	}
 
 	if (value.type != INVALID_ID && usesReturnValue)
@@ -1567,6 +1618,11 @@ void Program::ExecuteModuleConstant(uint16 moduleID, uint16 constant)
 	switch (moduleID)
 	{
 	case IO_MODULE_ID: m_Stack.push_back(IOModule::Constant(this, constant)); break;
+	case MATH_MODULE_ID: m_Stack.push_back(MathModule::Constant(this, constant)); break;
+	case WINDOW_MODULE_ID: m_Stack.push_back(WindowModule::Constant(this, constant)); break;
+	case GL_MODULE_ID: m_Stack.push_back(GLModule::Constant(this, constant)); break;
+	case FS_MODULE_ID: m_Stack.push_back(FSModule::Constant(this, constant)); break;
+	case MEM_MODULE_ID: m_Stack.push_back(MemModule::Constant(this, constant)); break;
 	}
 }
 
@@ -1575,7 +1631,6 @@ void Program::ExecuteAssignFunction(const Value& dstValue, const Value& assignVa
 	CallFrame callFrame;
 	callFrame.basePointer = m_Stack.size();
 	callFrame.popThisStack = true;
-	callFrame.returnPC = m_ProgramCounter;
 	callFrame.usesReturnValue = false;
 	callFrame.loopCount = m_LoopStack.size();
 
@@ -1586,6 +1641,8 @@ void Program::ExecuteAssignFunction(const Value& dstValue, const Value& assignVa
 	m_Stack.push_back(assignValue);
 	Frame* frame = m_FramePool.Acquire(function->numLocals);
 	AddFunctionArgsToFrame(frame, function);
+
+	callFrame.returnPC = m_ProgramCounter;
 
 	m_ThisStack.push_back(Value::MakePointer(dstValue.type, 1, dstValue.data, m_StackAllocator));
 
@@ -1607,7 +1664,6 @@ void Program::ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Func
 	CallFrame callFrame;
 	callFrame.basePointer = m_Stack.size();
 	callFrame.popThisStack = true;
-	callFrame.returnPC = m_ProgramCounter;
 	callFrame.usesReturnValue = true;
 	callFrame.loopCount = m_LoopStack.size();
 
@@ -1618,6 +1674,7 @@ void Program::ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Func
 	m_Stack.push_back(rhs);
 	Frame* frame = m_FramePool.Acquire(function->numLocals);
 	AddFunctionArgsToFrame(frame, function);
+	callFrame.returnPC = m_ProgramCounter;
 
 	m_ThisStack.push_back(Value::MakePointer(lhs.type, 1, lhs.data, m_StackAllocator));
 
@@ -1627,12 +1684,60 @@ void Program::ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Func
 	m_ProgramCounter = function->pc;
 }
 
-void Program::AddFunctionArgsToFrame(Frame* frame, Function* function)
+void Program::ExecuteCastFunction(const Value& dstValue, const Value& srcValue, Function* function)
+{
+	CallFrame callFrame;
+	callFrame.basePointer = m_Stack.size();
+	callFrame.popThisStack = true;
+	callFrame.usesReturnValue = false;
+	callFrame.loopCount = m_LoopStack.size();
+
+	m_CurrentScope++;
+	m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+	callFrame.scopeCount = m_CurrentScope;
+
+	m_Stack.push_back(srcValue);
+	Frame* frame = m_FramePool.Acquire(function->numLocals);
+	AddFunctionArgsToFrame(frame, function, false);
+
+	callFrame.returnPC = m_ProgramCounter;
+
+	m_ThisStack.push_back(Value::MakePointer(dstValue.type, 1, dstValue.data, m_StackAllocator));
+
+	m_CallStack.push_back(callFrame);
+	m_FrameStack.push_back(frame);
+
+	m_ProgramCounter = function->pc;
+
+	while (m_ProgramCounter != callFrame.returnPC)
+	{
+		OpCode innerOpCode = ReadOPCode();
+		if (innerOpCode == OpCode::END) break;
+		ExecuteOpCode(innerOpCode);
+	}
+}
+
+void Program::AddFunctionArgsToFrame(Frame* frame, Function* function, bool readCastFunctionID)
 {
 	for (int32 i = function->parameters.size() - 1; i >= 0; i--)
 	{
+		uint16 castFunctionID = INVALID_ID;
+		if (readCastFunctionID)
+			castFunctionID = ReadUInt16();
+
 		const FunctionParameter& param = function->parameters[i];
 		Value arg = m_Stack.back(); m_Stack.pop_back();
+
+		if (castFunctionID != INVALID_ID)
+		{
+			Class* toClass = GetClass(param.type.type);
+			Function* castFunction = toClass->GetFunction(castFunctionID);
+			Value original = arg;
+			arg = Value::MakeObject(this, param.type.type, m_StackAllocator);
+			m_ScopeStack[m_CurrentScope].objects.push_back(arg);
+			ExecuteCastFunction(arg, original, castFunction);
+		}
+
 		if (!param.isReference)
 		{
 			if (!Value::IsPrimitiveType(param.type.type) && param.type.pointerLevel == 0)
@@ -1729,7 +1834,6 @@ void Program::ExecutePendingDestructors(uint32 offset)
 		CallFrame callFrame;
 		callFrame.basePointer = m_Stack.size();
 		callFrame.popThisStack = true;
-		callFrame.returnPC = m_ProgramCounter;
 		callFrame.usesReturnValue = false;
 		callFrame.loopCount = m_LoopStack.size();
 
@@ -1739,6 +1843,8 @@ void Program::ExecutePendingDestructors(uint32 offset)
 
 		Frame* frame = m_FramePool.Acquire(destructor->numLocals);
 		AddFunctionArgsToFrame(frame, destructor);
+
+		callFrame.returnPC = m_ProgramCounter;
 
 		m_ThisStack.push_back(Value::MakePointer(object.type, 1, object.data, m_StackAllocator));
 

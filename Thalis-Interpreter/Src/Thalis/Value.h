@@ -231,6 +231,34 @@ struct Value
 		return false;
 	}
 
+	inline std::string GetString() const
+	{
+		return (char*)*(void**)data;
+	}
+
+	inline char* GetCString() const
+	{
+		return (char*)*(void**)data;
+	}
+
+	inline void AssignUIntDirect(uint64 value)
+	{
+		switch ((ValueType)type) {
+		case ValueType::BOOL:   *(bool*)data = value; break;
+		case ValueType::CHAR:   *(char*)data = value; break;
+		case ValueType::INT8:   *(int8*)data = value; break;
+		case ValueType::UINT8:  *(uint8*)data = value; break;
+		case ValueType::INT16:  *(int16*)data = value; break;
+		case ValueType::UINT16: *(uint16*)data = value; break;
+		case ValueType::INT32:  *(int32*)data = value; break;
+		case ValueType::UINT32: *(uint32*)data = value; break;
+		case ValueType::INT64:  *(int64*)data = value; break;
+		case ValueType::UINT64: *(uint64*)data = value; break;
+		case ValueType::REAL32: *(real32*)data = value; break;
+		case ValueType::REAL64: *(real64*)data = value; break;
+		}
+	}
+
 	inline friend std::ostream& operator<<(std::ostream& os, const Value& v)
 	{
 		if (v.pointerLevel == 1 && v.type == (uint16)ValueType::CHAR)

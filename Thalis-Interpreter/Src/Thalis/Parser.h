@@ -46,10 +46,13 @@ private:
 
 	Function* GenerateDefaultCopyFunction(Class* cls, const std::string& name);
 
+	bool WasFileAlreadyParsed(const std::string& file);
+private:
 	Program* m_Program;
 	std::vector<Scope*> m_ScopeStack;
 
 	std::string m_ErrorMessage;
+	std::vector<std::string> m_ParsedFiles;
 
 	std::string m_CurrentClassName;
 	bool m_CurrentFunctionReturnsReference;

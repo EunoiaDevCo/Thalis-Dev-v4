@@ -4,14 +4,13 @@
 
 struct TypeInfo
 {
-	TypeInfo(uint16 type, uint8 pointerLevel, uint16 derivedType = INVALID_ID) :
-		type(type), pointerLevel(pointerLevel), derivedType(derivedType == INVALID_ID ? type : derivedType) { }
+	TypeInfo(uint16 type, uint8 pointerLevel) :
+		type(type), pointerLevel(pointerLevel) { }
 
 	TypeInfo() :
-		type(INVALID_ID), pointerLevel(0), derivedType(INVALID_ID) {
+		type(INVALID_ID), pointerLevel(0) {
 	}
 
 	uint16 type;
 	uint8 pointerLevel;
-	uint16 derivedType;
 };
