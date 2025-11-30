@@ -1,0 +1,108 @@
+Import GL;
+Import Mem;
+Import "Math/Matrix.tls"
+Import "DataStructures/List.tls"
+
+class Vertex2D
+{
+    public Vec2 pos;
+    public Vec2 texCoord;
+    public Vec4 color;
+    public real32 textureIndex;
+};
+
+class SubmitedSprite
+{
+    public Vertex2D bottomLeft;
+    public Vertex2D topLeft;
+    public Vertex2D topRight;
+    public Vertex2D bottomRight;
+};
+
+class SpriteGroup
+{
+    public uint32 textures[32];
+    public uint32 numTextures;
+    public List<SubmitedSprite> sprites;
+    public uint32 vertexOffset;
+    public uint32 indexCount;
+};
+
+class SimpleSpriteSheet
+{
+    public uint32 numRows;
+    public uint32 numCols;
+};
+
+class Sprite
+{
+    public Vec2 pos;
+    public Vec2 size;
+    public Vec4 color;
+    public uint32 texture;
+    public SimpleSpriteSheet spriteSheet;
+    public Vec2 spriteSheetPos;
+    public real32 rot;
+};
+
+class BatchRenderer
+{
+    public BatchRenderer(uint32 windowHandle, uint32 maxSprites)
+    {
+        m_NumSpriteGroups = 0;
+
+        if(!GL.glInit(windowHandle))
+        {
+            IO.Println("Failed to init OpenGL");
+            return;
+        }
+
+        m_VAO = GL.glGenVertexArrays();
+
+        GL.glBindVertexArray(m_VAO);
+        GL.glEnableVertexAttribArray(0);
+        GL.glEnableVertexAttribArray(1);
+        GL.glEnableVertexAttribArray(2);
+        GL.glEnableVertexAttribArray(3);
+
+        InitBuffers(maxSprites);
+        
+        GL.glBindVertexArray(0);
+
+        SetCamera(Vec2(0.0, 0.0), 0.0);
+        SetOrthographic(-1.0, 1.0, -1.0, 1.0, 0.001, 1000.0);
+    }
+
+    public void SetCamera(Vec2& pos, real32 rot)
+    {
+        m_View = Mat4.CreateTranslation(Vec3(pos.x * -1.0, pos.y * -1.0, 0.0));
+		if (rot != 0)
+			m_View = m_View * Mat4.CreateRotationZ(rot * -1.0);
+		m_ViewProjection = m_Projection * m_View;
+		m_CamPos = pos;
+    }
+
+    public void SetOrthographic(real32 left, real32 right, real32 bottom, real32 top, real32 near, real32 far)
+    {
+        m_Projection = Mat4.CreateOrthographic(left, right, bottom, top, near, far);
+        m_ViewProjection = m_Projection * m_View;
+    }
+
+    public void InitBuffers(uint32 maxSprites)
+    {
+        
+    }
+
+    private uint32 m_VAO;
+    private uint32 m_VBO;
+    private uint32 m_IBO;
+
+    private Mat4 m_Projection;
+    private Mat4 m_View;
+    private Mat4 m_ViewProjection;
+    private Vec2 m_CamPos;
+
+    private SpriteGroup m_SpriteGroups[32];
+    private uint32 m_NumSpriteGroups;
+    List<SubmitedSprite> m_ColoredSprites;
+}

@@ -1,0 +1,26 @@
+Import Window;
+Import "DataStructures/String.tls"
+
+class Display
+{
+    public Display(String& title, uint32 width, uint32 height)
+    {
+        m_Handle = Window.Create(title.Str(), width, height);
+    }
+
+    public void Destroy()
+    {
+        Window.Destroy(m_Handle);
+    }
+
+    public bool IsCloseRequested() { return Window.CheckForEvent(m_Handle, Window.CB_CLOSE); }
+
+    public void Update() { Window.Update(m_Handle); }
+    public void Present() { Window.Present(m_Handle); }
+
+    public uint32 GetSize(uint32* width, uint32* height) { Window.GetSize(m_Handle, width, height); }
+
+    public uint32 GetHandle() { return m_Handle; }
+
+    private uint32 m_Handle;
+};

@@ -569,3 +569,46 @@ struct ASTExpressionStrlen : public ASTExpression
 	virtual TypeInfo GetTypeInfo(Program* program) override;
 	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
 };
+
+struct ASTExpressionSizeOfStatic : public ASTExpression
+{
+	uint16 type;
+	bool pointer;
+	std::string templateTypeName;
+
+	ASTExpressionSizeOfStatic(uint16 type, bool pointer, const std::string& templateTypeName) :
+		type(type), pointer(pointer), templateTypeName(templateTypeName) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
+};
+
+struct ASTExpressionOffsetOf : public ASTExpression
+{
+	uint16 classID;
+	std::vector<std::string> members;
+	uint64 offset;
+
+	ASTExpressionOffsetOf(uint16 classID, const std::vector<std::string>& members) :
+		classID(classID), members(members), offset(UINT64_MAX) { }
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
+	virtual bool Resolve(Program* program) override;
+};
+
+struct ASTExpressionArithmaticEquals : public ASTExpression
+{
+	ASTExpression* expr;
+	ASTExpression* incrementExpr;
+	Operator op;
+
+	ASTExpressionArithmaticEquals(ASTExpression* expr, ASTExpression* incrementExpr, Operator op) :
+		expr(expr), incrementExpr(incrementExpr), op(op) {}
+
+	virtual void EmitCode(Program* program) override;
+	virtual TypeInfo GetTypeInfo(Program* program) override;
+	virtual ASTExpression* InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass) override;
+};

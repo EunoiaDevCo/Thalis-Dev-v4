@@ -1,0 +1,127 @@
+Import Math;
+
+class List -> template[class T]
+{
+    public List(uint32 capacity, uint32 elementCount)
+    {
+        m_Capacity = capacity;
+        m_ElementCount = elementCount;
+        m_Elements = new T[m_Capacity];
+    }
+
+    public List()
+    {
+        m_Capacity = 16;
+        m_ElementCount = 0;
+        m_Elements = new T[m_Capacity];
+    }
+
+    public List(List<T>& list)
+    {
+        m_Capacity = list.m_Capacity;
+        m_ElementCount = list.m_ElementCount;
+        m_Elements = new T[m_Capacity];
+        for(uint32 i = 0; i < m_ElementCount; i++)
+            m_Elements[i] = list[i];
+    }
+
+    public void operator=(List<T>& list)
+    {
+        if(m_Capacity == 0)
+        {
+            m_Capacity = Math.Max(list.m_ElementCount, 64);
+            m_Elements = new T[m_Capacity];
+        }
+
+        if(list.m_ElementCount > m_Capacity)
+            Grow(list.m_ElementCount + 64);
+
+        for(uint32 i = 0; i < list.m_ElementCount; i++)
+            m_Elements[i] = list[i];
+
+        m_ElementCount = list.m_ElementCount;
+    }
+
+    public ~List()
+    {
+        if(m_Capacity > 0)
+            delete[] m_Elements;
+    }
+
+    public void Push(T& element)
+    {
+        if(m_ElementCount >= m_Capacity)
+            GrowAndCopy(m_Capacity * 2);
+
+        m_Elements[m_ElementCount++] = element;
+    }
+
+     public void Insert(T& element, uint32 index)
+    {
+        if (m_ElementCount >= m_Capacity)
+            GrowAndCopy(m_Capacity * 2);
+
+        for (uint32 i = m_ElementCount; i > index; i--)
+            m_Elements[i] = m_Elements[i - 1];
+
+        m_Elements[index] = element;
+        m_ElementCount++;
+    }
+
+    public T& operator[](uint32 index)
+    {
+        return m_Elements[index];
+    }
+
+    public T& Back()
+    {
+        return m_Elements[m_ElementCount - 1];
+    }
+
+    public void Pop()
+    {
+        m_ElementCount--;
+    }
+
+    public uint32 Size()
+    {
+        return m_ElementCount;
+    }
+
+    public bool Empty()
+    {
+        return m_ElementCount == 0;
+    }
+
+    public void Clear()
+    {
+        m_ElementCount = 0;
+    }
+
+    public T* GetData()
+    {
+        return m_Elements;
+    }
+
+    private void GrowAndCopy(uint32 capacity)
+    {
+        T* newData = new T[capacity];
+        for (uint32 i = 0; i < m_ElementCount; i++)
+            newData[i] = m_Elements[i];
+
+        delete[] m_Elements;
+        m_Elements = newData;
+        m_Capacity = capacity;
+    }
+
+    private void Grow(uint32 capacity)
+    {
+        m_Capacity = capacity;
+        delete[] m_Elements;
+        m_Elements = new T[m_Capacity];
+    }
+
+    private T* m_Elements;
+    private uint32 m_ElementCount;
+    private uint32 m_Capacity;
+};

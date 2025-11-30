@@ -18,7 +18,7 @@ enum class OpCode
 	PUSH_REAL32, PUSH_REAL64,
 	PUSH_CHAR, PUSH_BOOL, PUSH_CSTR, PUSH_LOCAL,
 	PUSH_TYPED_NULL, PUSH_INDEXED, PUSH_STATIC_VARIABLE,
-	PUSH_MEMBER, PUSH_THIS,
+	PUSH_MEMBER, PUSH_THIS, PUSH_UNTYPED_NULL,
 
 	PUSH_SCOPE, POP_SCOPE, PUSH_LOOP, POP_LOOP,
 
@@ -198,6 +198,9 @@ private:
 	void AddDestructorRecursive(const Value& value);
 	void ExecutePendingDestructors(uint32 offset);
 
+	void AddConstructorRecursive(const Value& value, bool addValue = false);
+	void ExecutePendingConstructors(uint32 offset);
+
 	void CleanUpForExecution();
 	void InitStatics();
 
@@ -242,6 +245,7 @@ private:
 	BumpAllocator* m_ReturnAllocator;
 
 	std::vector<Value> m_PendingDestructors;
+	std::vector<std::pair<Value, Function*>> m_PendingConstructors;
 
 	std::vector<ASTExpression*> m_CreatedExpressions;
 };

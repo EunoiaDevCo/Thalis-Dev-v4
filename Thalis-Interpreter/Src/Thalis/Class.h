@@ -33,7 +33,8 @@ class Class
 {
 public:
 	Class(const std::string& name, Class* baseClass = nullptr) :
-		m_Name(name), m_BaseName(name), m_BaseClass(baseClass), m_NextFunctionID(0), m_Destructor(nullptr), m_AssignSTFunction(nullptr), m_CopyConstructor(nullptr) { }
+		m_Name(name), m_BaseName(name), m_BaseClass(baseClass), m_NextFunctionID(0),
+		m_Destructor(nullptr), m_AssignSTFunction(nullptr), m_CopyConstructor(nullptr), m_DefaultConstructor(nullptr) { }
 
 	std::string GetName() const;
 
@@ -71,6 +72,7 @@ public:
 	inline bool HasDestructor() const { return m_Destructor != nullptr; }
 	inline bool HasAssignSTFunction() const { return m_AssignSTFunction != nullptr; }
 	inline bool HasCopyConstructor() const { return m_CopyConstructor != nullptr; }
+	inline bool HasDefaultConstructor() const { return m_DefaultConstructor != nullptr; }
 
 	inline bool IsTemplateClass() const { return m_TemplateDefinition.HasTemplate(); }
 	inline bool IsTemplateInstance() const { return m_IsTemplateInstance; }
@@ -80,6 +82,7 @@ public:
 	inline Function* GetDestructor() const { return m_Destructor; }
 	inline Function* GetAssignSTFunction() const { return m_AssignSTFunction; }
 	inline Function* GetCopyConstructor() const { return m_CopyConstructor; }
+	inline Function* GetDefaultConstructor() const { return m_DefaultConstructor; }
 
 	inline bool HasBaseClass() const { return m_BaseClass != nullptr; }
 	inline VTable* GetVTable() const { return m_VTable; }
@@ -110,6 +113,7 @@ private:
 	Function* m_Destructor;
 	Function* m_AssignSTFunction;
 	Function* m_CopyConstructor;
+	Function* m_DefaultConstructor;
 
 	std::vector<TemplateInstantiationCommand*> m_InstantiationCommands;
 

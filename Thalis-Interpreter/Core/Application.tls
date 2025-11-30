@@ -1,0 +1,6 @@
+class Application
+{
+    public virtual void Init() {}
+    public virtual void Update(real32 dt) {}
+    public virtual void Render() {}
+};

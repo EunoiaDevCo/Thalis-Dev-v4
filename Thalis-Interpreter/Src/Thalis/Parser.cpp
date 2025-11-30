@@ -343,6 +343,27 @@ bool Parser::ParseFunction(Tokenizer* tokenizer, Class* cls)
 			t = prev;
 
 		function->returnInfo.type = ParseType(t);
+		
+		if (function->returnInfo.type == INVALID_ID)
+		{
+			std::string typeName(t.text, t.length);
+			Class* cls = m_Program->GetClass(m_Program->GetClassID(m_CurrentClassName));
+			const TemplateDefinition& definition = cls->GetTemplateDefinition();
+			for (uint32 i = 0; i < definition.parameters.size(); i++)
+			{
+				if (typeName == definition.parameters[i].name)
+				{
+					function->returnTemplateTypeName = typeName;
+					function->returnInfo.type = (uint16)ValueType::TEMPLATE_TYPE;
+					break;
+				}
+			}
+
+			if (function->returnTemplateTypeName.empty())
+			{
+				COMPILE_ERROR(t.line, t.column, "Invalid return type", false);
+			}
+		}
 
 		uint8 pointerLevel = ParsePointerLevel(tokenizer);
 		function->returnInfo.pointerLevel = pointerLevel;
@@ -599,6 +620,7 @@ bool Parser::ParseClassVariable(Tokenizer* tokenizer, Class* cls, uint64* member
 			typeSize *= arrayDimensions[i].first;
 
 		typeSize += sizeof(ArrayHeader);
+		pointerLevel++;
 	}
 
 	Token equals = tokenizer->PeekToken();
@@ -1393,14 +1415,14 @@ ASTExpression* Parser::ParseUnary(Tokenizer* tokenizer)
 	case TokenTypeT::NOT: { // logical not
 		tokenizer->Expect(TokenTypeT::NOT);
 		ASTExpression* expr = ParseExpression(tokenizer);
-		ASTExpressionNegate* negateExpr = new ASTExpressionNegate(expr);
-		return negateExpr;
+		ASTExpressionInvert* invertExpr = new ASTExpressionInvert(expr);
+		return invertExpr;
 	} break;
 	case TokenTypeT::MINUS: { // unary negation
 		tokenizer->Expect(TokenTypeT::MINUS);
 		ASTExpression* expr = ParseExpression(tokenizer);
-		ASTExpressionInvert* invertExpr = new ASTExpressionInvert(expr);
-		return invertExpr;
+		ASTExpressionNegate* negateExpr = new ASTExpressionNegate(expr);
+		return negateExpr;
 	} break;
 	case TokenTypeT::OPEN_PAREN: {
 		tokenizer->Expect(TokenTypeT::OPEN_PAREN);
@@ -1569,26 +1591,36 @@ ASTExpression* Parser::ParsePostFix(Tokenizer* tokenizer)
 		{
 			tokenizer->GetToken();
 			ASTExpression* amountExpr = ParseExpression(tokenizer);
+			ASTExpressionArithmaticEquals* aritmaticPlusEqualsExpr = new ASTExpressionArithmaticEquals(expr, amountExpr, Operator::ADD);
+			return aritmaticPlusEqualsExpr;
 		}
 		else if (tok.type == TokenTypeT::MINUS_EQUALS)
 		{
 			tokenizer->GetToken();
 			ASTExpression* amountExpr = ParseExpression(tokenizer);
+			ASTExpressionArithmaticEquals* aritmaticMinusEqualsExpr = new ASTExpressionArithmaticEquals(expr, amountExpr, Operator::MINUS);
+			return aritmaticMinusEqualsExpr;
 		}
 		else if (tok.type == TokenTypeT::TIMES_EQUALS)
 		{
 			tokenizer->GetToken();
 			ASTExpression* amountExpr = ParseExpression(tokenizer);
+			ASTExpressionArithmaticEquals* aritmaticTimesEqualsExpr = new ASTExpressionArithmaticEquals(expr, amountExpr, Operator::MULTIPLY);
+			return aritmaticTimesEqualsExpr;
 		}
 		else if (tok.type == TokenTypeT::DIVIDE_EQUALS)
 		{
 			tokenizer->GetToken();
 			ASTExpression* amountExpr = ParseExpression(tokenizer);
+			ASTExpressionArithmaticEquals* aritmaticDivideEqualsExpr = new ASTExpressionArithmaticEquals(expr, amountExpr, Operator::DIVIDE);
+			return aritmaticDivideEqualsExpr;
 		}
 		else if (tok.type == TokenTypeT::MOD_EQUALS)
 		{
 			tokenizer->GetToken();
 			ASTExpression* amountExpr = ParseExpression(tokenizer);
+			ASTExpressionArithmaticEquals* aritmaticPlusEqualsExpr = new ASTExpressionArithmaticEquals(expr, amountExpr, Operator::MOD);
+			return aritmaticPlusEqualsExpr;
 		}
 		else
 		{
@@ -1766,6 +1798,52 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 		if (tokenizer->Expect(TokenTypeT::CLOSE_PAREN, &t)) COMPILE_ERROR(t.line, t.column, "Expected ')' after strlen expression", nullptr);
 		ASTExpressionStrlen* strlenExpr = new ASTExpressionStrlen(expr);
 		return strlenExpr;
+	}
+	else if (t.type == TokenTypeT::SIZE_OF)
+	{
+		if (tokenizer->Expect(TokenTypeT::OPEN_PAREN, &t)) COMPILE_ERROR(t.line, t.column, "Expected '(' after sizeof", nullptr);
+		Token typeToken = tokenizer->GetToken();
+		uint16 type = ParseType(typeToken);
+		uint8 pointerLevel = ParsePointerLevel(tokenizer);
+
+		std::string templateTypeName = "";
+		if (type == INVALID_ID)
+		{
+			std::string typeName(typeToken.text, typeToken.length);
+			Class* cls = m_Program->GetClass(m_Program->GetClassID(m_CurrentClassName));
+			const TemplateDefinition& definition = cls->GetTemplateDefinition();
+			for (uint32 i = 0; i < definition.parameters.size(); i++)
+			{
+				if (typeName == definition.parameters[i].name)
+				{
+					templateTypeName = typeName;
+					break;
+				}
+			}
+
+			if (templateTypeName.empty())
+				return nullptr;
+		}
+
+		if (tokenizer->Expect(TokenTypeT::CLOSE_PAREN, &t)) COMPILE_ERROR(t.line, t.column, "Expected ')' after sizeof expression", nullptr);
+		ASTExpressionSizeOfStatic* sizeofExpr = new ASTExpressionSizeOfStatic(type, pointerLevel > 0, templateTypeName);
+		return sizeofExpr;
+	}
+	else if (t.type == TokenTypeT::OFFSETOF)
+	{
+		if (tokenizer->Expect(TokenTypeT::OPEN_PAREN)) return nullptr;
+		Token typeToken = tokenizer->GetToken();
+		uint16 type = ParseType(typeToken);
+		if (tokenizer->Expect(TokenTypeT::DOT)) return nullptr;
+		Token memberToken;
+		if (tokenizer->Expect(TokenTypeT::IDENTIFIER, &memberToken)) return nullptr;
+		if (tokenizer->Expect(TokenTypeT::CLOSE_PAREN)) return nullptr;
+
+		std::vector<std::string> members;
+		members.push_back(std::string(memberToken.text, memberToken.length));
+
+		ASTExpressionOffsetOf* offsetofExpr = new ASTExpressionOffsetOf(type, members);
+		return offsetofExpr;
 	}
 	else if (t.type == TokenTypeT::IDENTIFIER || t.type == TokenTypeT::THIS)
 	{
@@ -2159,6 +2237,7 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 			else
 			{
 				chainExpr = MakeModuleConstant(moduleID, memberName, identifier);
+				tokenizer->SetPeek(peek);
 			}
 
 			return chainExpr;
@@ -2224,11 +2303,26 @@ ASTExpression* Parser::ParseExpressionChain(Tokenizer* tokenizer, ASTExpression*
 				uint32 slot = m_ScopeStack.back()->Resolve(members[0].first);
 				if (slot == INVALID_ID)
 				{
-					ASTExpression* thisExpr = new ASTExpressionThis(m_Program->GetClassID(m_CurrentClassName));
-					thisExpr = new ASTExpressionDereference(thisExpr);
 					std::vector<std::string> membs;
 					membs.push_back(members[0].first);
-					objExpr = new ASTExpressionPushMember(thisExpr, membs);
+
+					uint16 classID = m_Program->GetClassID(m_CurrentClassName);
+					Class* cls = m_Program->GetClass(classID);
+					TypeInfo typeInfo;
+					bool isArray = false;
+					uint64 staticOffset = cls->CalculateStaticOffset(m_Program, membs, &typeInfo, &isArray);
+					if (staticOffset == UINT64_MAX)
+					{
+						ASTExpression* thisExpr = new ASTExpressionThis(classID);
+						thisExpr = new ASTExpressionDereference(thisExpr);
+
+						objExpr = new ASTExpressionPushMember(thisExpr, membs);
+					}
+					else
+					{
+						ASTExpressionStaticVariable* staticVariableExpr = new ASTExpressionStaticVariable(classID, staticOffset, typeInfo, isArray);
+						objExpr = staticVariableExpr;
+					}
 				}
 				else
 				{
@@ -3141,6 +3235,7 @@ Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& nam
 			{
 				std::string idxName = "#TLS_idx_" + std::to_string(i) + "_" + std::to_string(d);
 				indexLocals.push_back(functionScope->AddLocal(idxName, TypeInfo((uint16)ValueType::UINT32, 0), ""));
+				function->numLocals++;
 			}
 
 			ASTExpression* thisMember = new ASTExpressionPushMember(new ASTExpressionDereference(new ASTExpressionThis(cls->GetID())), membs);

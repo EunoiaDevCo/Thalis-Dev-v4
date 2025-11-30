@@ -1,0 +1,37 @@
+Import "DataStructures/List.tls"
+
+class MapKeyPair -> template[class Key, class Element]
+{
+    public Key key;
+    public Element element;
+};
+
+class Map -> template[class Key, class Element]
+{
+    public Map()
+    {
+        
+    }
+
+    public Element& operator[](Key& key)
+    {
+        for(uint32 i = 0; i < m_MapKeyPairs.Size(); i++)
+        {
+            MapKeyPair<Key, Element>& keyPair = m_MapKeyPairs[i];
+            if(keyPair.key == key)
+            {
+                return keyPair.element;
+            }
+        }
+
+        MapKeyPair<Key, Element> keyPair;
+        keyPair.key = key;
+
+        m_MapKeyPairs.Push(keyPair);
+
+        MapKeyPair<Key, Element>& back = m_MapKeyPairs.Back();
+        return back.element;
+    }
+
+    private List< MapKeyPair<Key, Element> > m_MapKeyPairs;
+};

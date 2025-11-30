@@ -23,6 +23,12 @@ void ASTExpressionLiteral::EmitCode(Program* program)
 		return;
 	}
 
+	if (value.type == INVALID_ID && value.data == nullptr)
+	{
+		program->WriteOPCode(OpCode::PUSH_UNTYPED_NULL);
+		return;
+	}
+
 	switch ((ValueType)value.type)
 	{
 	case ValueType::UINT8: program->AddPushConstantUInt8Command(value.GetUInt8()); break;
@@ -207,9 +213,10 @@ void ASTExpressionSet::EmitCode(Program* program)
 	assignExpr->EmitCode(program);
 	expr->EmitCode(program);
 	program->AddSetCommand(assignFunctionID);
+
 	if (assignFunctionID != INVALID_ID)
 	{
-		for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+		for (int32 i = castFunctionIDs.size() - 1; i >= 0 ; i--)
 			program->WriteUInt16(castFunctionIDs[i]);
 	}
 }
@@ -222,12 +229,14 @@ TypeInfo ASTExpressionSet::GetTypeInfo(Program* program)
 bool ASTExpressionSet::Resolve(Program* program)
 {
 	TypeInfo exprTypeInfo = expr->GetTypeInfo(program);
-	if (exprTypeInfo.pointerLevel > 0 || Value::IsPrimitiveType(exprTypeInfo.type) || exprTypeInfo.type == INVALID_ID) return true;
+	if (exprTypeInfo.pointerLevel > 0 || Value::IsPrimitiveType(exprTypeInfo.type) || exprTypeInfo.type == INVALID_ID) 
+		return true;
 
 	Class* cls = program->GetClass(exprTypeInfo.type);
 	std::vector<ASTExpression*> argExprs;
 	argExprs.push_back(assignExpr);
-	assignFunctionID = cls->GetFunctionID("operator=", argExprs, castFunctionIDs);
+	assignFunctionID = cls->GetFunctionID("operator=", argExprs, castFunctionIDs, true);
+
 	return true;
 }
 
@@ -333,7 +342,7 @@ ASTExpression* ASTExpressionStackArrayDeclare::InjectTemplateType(Program* progr
 void ASTExpressionPushIndex::EmitCode(Program* program)
 {
 	if (isStatement) return;
-	TypeInfo typeInfo = GetTypeInfo(program);
+	TypeInfo typeInfo = expr->GetTypeInfo(program);
 	expr->EmitCode(program);
 	for (int32 i = indexExprs.size() - 1; i >= 0; i--)
 		indexExprs[i]->EmitCode(program);
@@ -341,7 +350,7 @@ void ASTExpressionPushIndex::EmitCode(Program* program)
 	program->AddPushIndexedCommand(program->GetTypeSize(typeInfo.type), indexExprs.size(), indexFunctionID, typeInfo.type);
 	if (indexFunctionID != INVALID_ID)
 	{
-		for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+		for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 			program->WriteUInt16(castFunctionIDs[i]);
 	}
 }
@@ -349,7 +358,21 @@ void ASTExpressionPushIndex::EmitCode(Program* program)
 TypeInfo ASTExpressionPushIndex::GetTypeInfo(Program* program)
 {
 	TypeInfo typeInfo = expr->GetTypeInfo(program);
+
+	if (!Value::IsPrimitiveType(typeInfo.type) && typeInfo.pointerLevel == 0)
+	{
+		Class* cls = program->GetClass(typeInfo.type);
+		indexFunctionID = indexFunctionID == INVALID_ID ? cls->GetFunctionID("operator[]", indexExprs, castFunctionIDs) : indexFunctionID;
+
+		if(indexFunctionID != INVALID_ID)
+		{
+			const TypeInfo& returnInfo = cls->GetFunction(indexFunctionID)->returnInfo;
+			return returnInfo;
+		}
+	}
+
 	typeInfo.pointerLevel--;
+
 	return typeInfo;
 }
 
@@ -369,7 +392,7 @@ bool ASTExpressionPushIndex::Resolve(Program* program)
 	if (Value::IsPrimitiveType(typeInfo.type) || typeInfo.pointerLevel > 0) return true;
 
 	Class* cls = program->GetClass(typeInfo.type);
-	indexFunctionID = cls->GetFunctionID("operator[]", indexExprs, castFunctionIDs);
+	indexFunctionID = indexFunctionID == INVALID_ID ? cls->GetFunctionID("operator[]", indexExprs, castFunctionIDs) : indexFunctionID;
 }
 
 void ASTExpressionBinary::EmitCode(Program* program)
@@ -676,7 +699,7 @@ void ASTExpressionStaticFunctionCall::EmitCode(Program* program)
 		argExprs[i]->EmitCode(program);
 
 	program->AddStaticFunctionCallCommand(classID, functionID, !isStatement);
-	for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+	for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 		program->WriteUInt16(castFunctionIDs[i]);
 }
 
@@ -781,7 +804,7 @@ void ASTExpressionDeclareObjectWithConstructor::EmitCode(Program* program)
 		argExprs[i]->EmitCode(program);
 
 	program->AddDeclareObjectWithConstructorCommand(type, functionID, slot);
-	for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+	for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 		program->WriteUInt16(castFunctionIDs[i]);
 }
 
@@ -826,7 +849,7 @@ void ASTExpressionDeclareObjectWithAssign::EmitCode(Program* program)
 	program->AddDeclareObjectWithAssignCommand(type, slot, copyConstructorID);
 	if (copyConstructorID != INVALID_ID)
 	{
-		for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+		for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 			program->WriteUInt16(castFunctionIDs[i]);
 	}
 }
@@ -947,7 +970,7 @@ void ASTExpressionMemberFunctionCall::EmitCode(Program* program)
 		program->AddMemberFunctionCallCommand(objTypeInfo.type, functionID, !isStatement);
 	}
 
-	for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+	for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 		program->WriteUInt16(castFunctionIDs[i]);
 }
 
@@ -1056,7 +1079,7 @@ void ASTExpressionConstructorCall::EmitCode(Program* program)
 		argExprs[i]->EmitCode(program);
 
 	program->AddConstructorCallCommand(type, functionID);
-	for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+	for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 		program->WriteUInt16(castFunctionIDs[i]);
 }
 
@@ -1069,7 +1092,8 @@ bool ASTExpressionConstructorCall::Resolve(Program* program)
 {
 	if (type == (uint16)ValueType::TEMPLATE_TYPE) return true;
 	Class* cls = program->GetClass(type);
-	functionID = cls->GetFunctionID(cls->GetName(), argExprs, castFunctionIDs, false);
+
+	functionID = cls->GetFunctionID(cls->GetName(), argExprs, castFunctionIDs);
 	return functionID != INVALID_ID;
 }
 
@@ -1100,7 +1124,7 @@ void ASTExpressionNew::EmitCode(Program* program)
 		argExprs[i]->EmitCode(program);
 
 	program->AddNewCommand(type, functionID);
-	for (uint32 i = 0; i < castFunctionIDs.size(); i++)
+	for (int32 i = castFunctionIDs.size() - 1; i >= 0; i--)
 		program->WriteUInt16(castFunctionIDs[i]);
 }
 
@@ -1260,4 +1284,84 @@ ASTExpression* ASTExpressionStrlen::InjectTemplateType(Program* program, Class* 
 {
 	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
 	return new ASTExpressionStrlen(injectedExpr);
+}
+
+void ASTExpressionSizeOfStatic::EmitCode(Program* program)
+{
+	if (isStatement) return;
+
+	if (pointer)
+		program->AddPushConstantUInt64Command(sizeof(void*));
+	else
+		program->AddPushConstantUInt64Command(program->GetTypeSize(type));
+}
+
+TypeInfo ASTExpressionSizeOfStatic::GetTypeInfo(Program* program)
+{
+	return TypeInfo((uint16)ValueType::UINT64, 0);
+}
+
+ASTExpression* ASTExpressionSizeOfStatic::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	uint16 injectedType = type;
+	bool injectedPointer = pointer;
+	if (!templateTypeName.empty())
+	{
+		uint32 index = cls->InstantiateTemplateGetIndex(program, templateTypeName);
+		injectedType = instantiation.args[index].value;
+		if (!injectedPointer)
+			injectedPointer = instantiation.args[index].pointerLevel > 0;
+	}
+
+	return new ASTExpressionSizeOfStatic(type, injectedPointer, "");
+}
+
+void ASTExpressionOffsetOf::EmitCode(Program* program)
+{
+	if (isStatement) return;
+
+	program->AddPushConstantUInt64Command(offset);
+}
+
+TypeInfo ASTExpressionOffsetOf::GetTypeInfo(Program* program)
+{
+	return TypeInfo((uint16)ValueType::UINT64, 0);
+}
+
+ASTExpression* ASTExpressionOffsetOf::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	return new ASTExpressionOffsetOf(classID, members);
+}
+
+bool ASTExpressionOffsetOf::Resolve(Program* program)
+{
+	TypeInfo typeInfo;
+	bool isArray = false;
+	offset = program->GetClass(classID)->CalculateMemberOffset(program, members, &typeInfo, &isArray);
+	return true;
+}
+
+void ASTExpressionArithmaticEquals::EmitCode(Program* program)
+{
+	expr->EmitCode(program);
+	incrementExpr->EmitCode(program);
+	switch (op)
+	{
+	case Operator::ADD: program->WriteOPCode(OpCode::PLUS_EQUALS); break;
+	case Operator::MINUS: program->WriteOPCode(OpCode::MINUS_EQUALS); break;
+	case Operator::MULTIPLY: program->WriteOPCode(OpCode::TIMES_EQUALS); break;
+	case Operator::DIVIDE: program->WriteOPCode(OpCode::DIVIDE_EQUALS); break;
+	}
+}
+
+TypeInfo ASTExpressionArithmaticEquals::GetTypeInfo(Program* program)
+{
+	return expr->GetTypeInfo(program);
+}
+
+ASTExpression* ASTExpressionArithmaticEquals::InjectTemplateType(Program* program, Class* cls, const TemplateInstantiation& instantiation, Class* templatedClass)
+{
+	ASTExpression* injectedExpr = expr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	ASTExpression* injectedIncrementExpr = incrementExpr->InjectTemplateType(program, cls, instantiation, templatedClass);
+	return new ASTExpressionArithmaticEquals(injectedExpr, injectedIncrementExpr, op);
 }

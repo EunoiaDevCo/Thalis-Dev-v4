@@ -1,0 +1,19 @@
+Import "Core/Application.tls"
+
+class Game -> inherit[Application]
+{
+    public virtual void Init()
+    {
+        IO.Println("Heyo");
+    }
+
+    public virtual void Update(real32 dt)
+    {
+
+    }
+
+    public virtual void Render()
+    {
+
+    }
+};

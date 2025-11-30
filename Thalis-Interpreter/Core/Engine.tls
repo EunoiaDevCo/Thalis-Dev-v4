@@ -1,0 +1,59 @@
+Import "Core/Application.tls"
+Import "Rendering/Display.tls"
+Import "DataStructures/String.tls"
+Import "Rendering/BatchRenderer.tls"
+
+class Engine
+{
+    public static void Init(String& title, uint32 width, uint32 height, Application* app)
+    {
+        s_Display = Display(title, width, height);
+        s_Application = app;
+        s_Running = false;
+        s_Renderer = new BatchRenderer(s_Display.GetHandle(), 10000);
+    }
+
+    public static void Start()
+    {
+        s_Running = true;
+        s_Application->Init();
+
+        real32 dt = 1.0 / 64.0;
+        while(s_Running)
+        {
+            if(s_Display.IsCloseRequested())
+            {
+                Stop();
+            }
+
+            Update(dt);
+            Render();
+        }
+
+        s_Display.Destroy();
+        delete s_Application;
+        delete s_Renderer;
+    }
+
+    public static void Stop()
+    {
+        s_Running = false;
+    }
+
+    private static void Update(real32 dt)
+    {
+        s_Application->Update(dt);
+        s_Display.Update();
+    }
+
+    private static void Render()
+    {
+        s_Application->Render();
+        s_Display.Present();
+    }
+
+    private static Display s_Display;
+    private static Application* s_Application;
+    private static bool s_Running = false;
+    private static BatchRenderer* s_Renderer;
+};

@@ -69,50 +69,6 @@ Value Value::CastTo(Program* program, uint16 newType, uint8 pointerLevel, Alloca
 	return value;
 }
 
-Value Value::MakeArray(Program* program, uint16 type, uint8 elementPointerLevel, uint32* dimension, uint32 numDimensions, Allocator* allocator)
-{
-	uint64 typeSize = elementPointerLevel == 0 ? program->GetTypeSize(type) : sizeof(void*);
-	if (!Value::IsPrimitiveType(type) && elementPointerLevel == 0)
-		typeSize += sizeof(VTable*);
-
-	ArrayHeader header {};
-	header.elementPointerLevel = elementPointerLevel;
-	header.numDimensions = numDimensions;
-	uint32 numElements = 1;
-	for (uint32 i = 0; i < numDimensions; i++)
-	{
-		header.dimensions[i] = dimension[i];
-		numElements *= dimension[i];
-	}
-
-	uint64 arrayDataSize = typeSize * numElements + sizeof(ArrayHeader);
-	uint8* arrayData = (uint8*)allocator->Alloc(arrayDataSize);
-	memset(arrayData, 0, arrayDataSize);
-	memcpy(arrayData, &header, sizeof(ArrayHeader));
-
-	uint8* elements = arrayData + sizeof(ArrayHeader);
-	if (elementPointerLevel == 0 && !IsPrimitiveType(type))
-	{
-		Class* cls = program->GetClass(type);
-		VTable* vtable = cls->GetVTable();
-
-		for (uint32 i = 0; i < numElements; i++)
-		{
-			uint8* elementBase = elements + i * typeSize;
-			*(VTable**)elementBase = vtable;
-		}
-	}
-
-	Value array;
-	array.type = type;
-	array.pointerLevel = 1 + elementPointerLevel;
-	array.isArray = true;
-	array.data = elements;
-	array.isReference = false;
-
-	return array;
-}
-
 static void InitializeArrayHeaders(Program* program, uint8* data, Class* cls)
 {
 	const std::vector<ClassField>& members = cls->GetMemberFields();
@@ -146,6 +102,52 @@ static void InitializeArrayHeaders(Program* program, uint8* data, Class* cls)
 			InitializeArrayHeaders(program, data + member.offset, program->GetClass(member.type.type));
 		}
 	}
+}
+
+Value Value::MakeArray(Program* program, uint16 type, uint8 elementPointerLevel, uint32* dimension, uint32 numDimensions, Allocator* allocator)
+{
+	uint64 typeSize = elementPointerLevel == 0 ? program->GetTypeSize(type) : sizeof(void*);
+	if (!Value::IsPrimitiveType(type) && elementPointerLevel == 0)
+		typeSize += sizeof(VTable*);
+
+	ArrayHeader header {};
+	header.elementPointerLevel = elementPointerLevel;
+	header.numDimensions = numDimensions;
+	uint32 numElements = 1;
+	for (uint32 i = 0; i < numDimensions; i++)
+	{
+		header.dimensions[i] = dimension[i];
+		numElements *= dimension[i];
+	}
+
+	uint64 arrayDataSize = typeSize * numElements + sizeof(ArrayHeader);
+	uint8* arrayData = (uint8*)allocator->Alloc(arrayDataSize);
+	memset(arrayData, 0, arrayDataSize);
+	memcpy(arrayData, &header, sizeof(ArrayHeader));
+
+	uint8* elements = arrayData + sizeof(ArrayHeader);
+	if (elementPointerLevel == 0 && !IsPrimitiveType(type))
+	{
+		Class* cls = program->GetClass(type);
+		VTable* vtable = cls->GetVTable();
+
+		for (uint32 i = 0; i < numElements; i++)
+		{
+			uint8* elementBase = elements + i * typeSize;
+			*(VTable**)elementBase = vtable;
+
+			InitializeArrayHeaders(program, elementBase, cls);
+		}
+	}
+
+	Value array;
+	array.type = type;
+	array.pointerLevel = 1 + elementPointerLevel;
+	array.isArray = true;
+	array.data = elements;
+	array.isReference = false;
+
+	return array;
 }
 
 Value Value::MakeObject(Program* program, uint16 type, Allocator* allocator)

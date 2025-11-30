@@ -655,6 +655,9 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint8 pointerLevel = ReadUInt8();
 		m_Stack.push_back(Value::MakeNULL(type, pointerLevel));
 	} break;
+	case OpCode::PUSH_UNTYPED_NULL: {
+		m_Stack.push_back(Value::MakeNULL());
+	} break;
 	case OpCode::PUSH_INDEXED: {
 		uint64 typeSize = ReadUInt64();
 		uint8 numIndices = ReadUInt8();
@@ -879,11 +882,35 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint8 numDimensions = ReadUInt8();
 		uint32 initializerCount = ReadUInt32();
 		uint16 slot = ReadUInt16();
+
+		uint32 elementCount = 1;
 		for (uint32 i = 0; i < numDimensions; i++)
+		{
 			m_Dimensions[i] = ReadUInt32();
+			elementCount *= m_Dimensions[i];
+		}
 
 		uint64 typeSize = GetTypeSize(type);
 		Value array = Value::MakeArray(this, type, elementPointerLevel, m_Dimensions, numDimensions, m_StackAllocator);
+
+		if (!Value::IsPrimitiveType(type))
+		{
+			uint32 ccount = m_PendingConstructors.size();
+			for (uint32 i = 0; i < elementCount; i++)
+			{
+				Value element;
+				element.type = type;
+				element.pointerLevel = elementPointerLevel;
+				element.isReference = false;
+				element.isArray = false;
+				element.data = (uint8*)array.data + i * typeSize;
+
+				AddConstructorRecursive(element, true);
+			}
+
+			ExecutePendingConstructors(ccount);
+		}
+
 		for (uint32 i = 0; i < initializerCount; i++)
 		{
 			Value assignValue = m_Stack.back();
@@ -901,6 +928,10 @@ void Program::ExecuteOpCode(OpCode opcode)
 		Value object = Value::MakeObject(this, type, m_StackAllocator);
 		m_FrameStack.back()->DeclareLocal(slot, object);
 		m_ScopeStack[m_CurrentScope].objects.push_back(object);
+
+		uint32 ccount = m_PendingConstructors.size();
+		AddConstructorRecursive(object);
+		ExecutePendingConstructors(ccount);
 
 		if (functionID != INVALID_ID)
 		{
@@ -940,6 +971,10 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_FrameStack.back()->DeclareLocal(slot, object);
 		m_ScopeStack[m_CurrentScope].objects.push_back(object);
 
+		uint32 ccount = m_PendingConstructors.size();
+		AddConstructorRecursive(object);
+		ExecutePendingConstructors(ccount);
+
 		if (copyConstructorID != INVALID_ID)
 		{
 			Class* cls = GetClass(type);
@@ -969,6 +1004,11 @@ void Program::ExecuteOpCode(OpCode opcode)
 
 		if (assignFunctionID == INVALID_ID)
 		{
+			if (!variable.IsPrimitive())
+			{
+				uint32 bp = 0;
+			}
+
 			variable.Assign(assignValue, GetTypeSize(variable.type));
 		}
 		else
@@ -1158,6 +1198,10 @@ void Program::ExecuteOpCode(OpCode opcode)
 		Value object = Value::MakeObject(this, type, m_StackAllocator);
 		m_ScopeStack[m_CurrentScope].objects.push_back(object);
 
+		uint32 ccount = m_PendingConstructors.size();
+		AddConstructorRecursive(object);
+		ExecutePendingConstructors(ccount);
+
 		Class* cls = GetClass(type);
 		Function* function = cls->GetFunction(functionID);
 
@@ -1201,7 +1245,13 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		if (functionID != INVALID_ID)
+		if (lhs.IsPointer())
+		{
+			Value val = lhs;
+			val.data = (uint8*)lhs.data + rhs.GetUInt64() * GetTypeSize(lhs.type);
+			m_Stack.push_back(val);
+		}
+		else if (functionID != INVALID_ID)
 		{
 			Class* cls = GetClass(lhs.type);
 			Function* function = cls->GetFunction(functionID);
@@ -1217,7 +1267,13 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint16 functionID = ReadUInt16();
 		Value rhs = m_Stack.back(); m_Stack.pop_back();
 		Value lhs = m_Stack.back(); m_Stack.pop_back();
-		if (functionID != INVALID_ID)
+		if (lhs.IsPointer())
+		{
+			Value val = lhs;
+			val.data = (uint8*)lhs.data - rhs.GetUInt64() * GetTypeSize(lhs.type);
+			m_Stack.push_back(val);
+		}
+		else if (functionID != INVALID_ID)
 		{
 			Class* cls = GetClass(lhs.type);
 			Function* function = cls->GetFunction(functionID);
@@ -1485,6 +1541,9 @@ void Program::ExecuteOpCode(OpCode opcode)
 		Value object = Value::MakeObject(this, type, m_HeapAllocator);
 		Value pointer = Value::MakePointer(type, 1, object.data, m_StackAllocator);
 
+		uint32 ccount = m_PendingConstructors.size();
+		AddConstructorRecursive(object);
+		ExecutePendingConstructors(ccount);
 
 		if (functionID != INVALID_ID)
 		{
@@ -1522,6 +1581,26 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_Stack.pop_back();
 
 		Value array = Value::MakeArray(this, type, pointerLevel, &size, 1, m_HeapAllocator);
+
+		if (!Value::IsPrimitiveType(type))
+		{
+			uint32 ccount = m_PendingConstructors.size();
+			uint64 typeSize = GetTypeSize(type);
+			for (uint32 i = 0; i < size; i++)
+			{
+				Value element;
+				element.type = type;
+				element.pointerLevel = pointerLevel;
+				element.isReference = false;
+				element.isArray = false;
+				element.data = (uint8*)array.data + i * typeSize;
+
+				AddConstructorRecursive(element, true);
+			}
+
+			ExecutePendingConstructors(ccount);
+		}
+
 		Value pointer = Value::MakePointer(type, pointerLevel + 1, array.data, m_StackAllocator);
 		//pointer.isArray = true;
 		m_Stack.push_back(pointer);
@@ -1592,6 +1671,26 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_Stack.pop_back();
 		uint32 length = strlen(value.GetCString());
 		m_Stack.push_back(Value::MakeUInt32(length, m_StackAllocator));
+	} break;
+	case OpCode::PLUS_EQUALS: {
+		Value increment = m_Stack.back(); m_Stack.pop_back();
+		Value value = m_Stack.back(); m_Stack.pop_back();
+		value.PlusEquals(increment);
+	} break;
+	case OpCode::MINUS_EQUALS: {
+		Value increment = m_Stack.back(); m_Stack.pop_back();
+		Value value = m_Stack.back(); m_Stack.pop_back();
+		value.MinusEquals(increment);
+	} break;
+	case OpCode::TIMES_EQUALS: {
+		Value increment = m_Stack.back(); m_Stack.pop_back();
+		Value value = m_Stack.back(); m_Stack.pop_back();
+		value.TimesEquals(increment);
+	} break;
+	case OpCode::DIVIDE_EQUALS: {
+		Value increment = m_Stack.back(); m_Stack.pop_back();
+		Value value = m_Stack.back(); m_Stack.pop_back();
+		value.DivideEquals(increment);
 	} break;
 	}
 }
@@ -1862,6 +1961,98 @@ void Program::ExecutePendingDestructors(uint32 offset)
 	}
 
 	m_PendingDestructors.resize(offset);
+}
+
+void Program::AddConstructorRecursive(const Value& value, bool addValue)
+{
+	if (value.IsPrimitive() || value.IsPointer())
+		return;
+
+	Class* cls = GetClass(value.type);
+	if (!cls)
+		return;
+
+	const std::vector<ClassField>& members = cls->GetMemberFields();
+	for (int32 i = (int32)members.size() - 1; i >= 0; i--)
+	{
+		const ClassField& field = members[i];
+
+		if (Value::IsPrimitiveType(field.type.type) || field.type.pointerLevel > 0)
+			continue;
+
+		if (field.numDimensions > 0)
+		{
+			uint64 typeSize = GetTypeSize(field.type.type);
+			uint32 numElements = 1;
+			for (uint32 j = 0; j < field.numDimensions; j++)
+				numElements *= field.dimensions[j].first;
+
+			uint8* data = (uint8*)value.data + field.offset;
+			for (uint32 j = 0; j < numElements; j++)
+			{
+				Value element;
+				element.type = field.type.type;
+				element.pointerLevel = 0;
+				element.data = data + j * typeSize;
+
+				AddConstructorRecursive(element, true);
+			}
+		}
+		else
+		{
+			Value member;
+			member.type = field.type.type;
+			member.pointerLevel = 0;
+			member.data = (uint8*)value.data + field.offset;
+
+			AddConstructorRecursive(member, true);
+		}
+	}
+
+	if (cls->HasDefaultConstructor() && addValue)
+		m_PendingConstructors.push_back(std::make_pair(value, cls->GetDefaultConstructor()));
+}
+
+void Program::ExecutePendingConstructors(uint32 offset)
+{
+	if (offset == m_PendingConstructors.size()) return;
+
+	for (uint32 i = offset; i < m_PendingConstructors.size(); i++)
+	{
+		const Value& object = m_PendingConstructors[i].first;
+		Function* constructor = m_PendingConstructors[i].second;
+
+		CallFrame callFrame;
+		callFrame.basePointer = m_Stack.size();
+		callFrame.popThisStack = true;
+		callFrame.usesReturnValue = false;
+		callFrame.loopCount = m_LoopStack.size();
+
+		m_CurrentScope++;
+		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
+
+		Frame* frame = m_FramePool.Acquire(constructor->numLocals);
+		AddFunctionArgsToFrame(frame, constructor);
+
+		callFrame.returnPC = m_ProgramCounter;
+
+		m_ThisStack.push_back(Value::MakePointer(object.type, 1, object.data, m_StackAllocator));
+
+		m_CallStack.push_back(callFrame);
+		m_FrameStack.push_back(frame);
+
+		m_ProgramCounter = constructor->pc;
+
+		while (m_ProgramCounter != callFrame.returnPC)
+		{
+			OpCode innerOpCode = ReadOPCode();
+			if (innerOpCode == OpCode::END) break;
+			ExecuteOpCode(innerOpCode);
+		}
+	}
+
+	m_PendingConstructors.resize(offset);
 }
 
 void Program::CleanUpForExecution()

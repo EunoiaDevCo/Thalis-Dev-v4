@@ -1,0 +1,356 @@
+Import Math;
+Import "Math/Vector.tls"
+
+class Mat3
+{
+    public Mat3(real32 m00, real32 m01, real32 m02,
+                real32 m10, real32 m11, real32 m12,
+                real32 m20, real32 m21, real32 m22)
+    {
+        values[0] = m00;  values[1] = m10;  values[2] = m20;
+        values[3] = m01;  values[4] = m11;  values[5] = m21;
+        values[6] = m02;  values[7] = m12;  values[8] = m22;
+    }
+
+    public Mat3(real32 diagonal)
+    {
+        values[0] = diagonal; values[1] = 0;        values[2] = 0;
+        values[3] = 0;        values[4] = diagonal; values[5] = 0;
+        values[6] = 0;        values[7] = 0;        values[8] = diagonal;
+    }
+
+    public Mat3 operator*(Mat3& mat)
+    {
+        Mat3 r(0.0f);
+
+        r.values[0] = values[0] * mat.values[0] + values[3] * mat.values[1] + values[6] * mat.values[2];
+        r.values[1] = values[1] * mat.values[0] + values[4] * mat.values[1] + values[7] * mat.values[2];
+        r.values[2] = values[2] * mat.values[0] + values[5] * mat.values[1] + values[8] * mat.values[2];
+
+        r.values[3] = values[0] * mat.values[3] + values[3] * mat.values[4] + values[6] * mat.values[5];
+        r.values[4] = values[1] * mat.values[3] + values[4] * mat.values[4] + values[7] * mat.values[5];
+        r.values[5] = values[2] * mat.values[3] + values[5] * mat.values[4] + values[8] * mat.values[5];
+
+        r.values[6] = values[0] * mat.values[6] + values[3] * mat.values[7] + values[6] * mat.values[8];
+        r.values[7] = values[1] * mat.values[6] + values[4] * mat.values[7] + values[7] * mat.values[8];
+        r.values[8] = values[2] * mat.values[6] + values[5] * mat.values[7] + values[8] * mat.values[8];
+        
+        return r;
+    }
+
+    public Vec3 operator*(Vec3& vec)
+    {
+        return Vec3(values[0] * vec.x + values[3] * vec.y + values[6] * vec.z,
+                    values[1] * vec.x + values[4] * vec.y + values[7] * vec.z,
+                    values[2] * vec.x + values[5] * vec.y + values[8] * vec.z);
+    }
+
+    public Vec2 operator*(Vec2& vec)
+    {
+        return Vec2(values[0] * vec.x + values[3] * vec.y + values[6] * 1.0,
+                    values[1] * vec.x + values[4] * vec.y + values[7] * 1.0);
+    }
+
+    public void operator=(Mat3& mat)
+    {
+        for(uint32 i = 0; i < 9; i++)
+            values[i] = mat.values[i];
+    }
+
+    public void Print()
+    {
+        IO.Print("[ "); 
+        IO.Print(values[0]); IO.Print(", "); IO.Print(values[3]); IO.Print(", "); IO.Print(values[6]);
+        IO.Println(" ]");
+
+        IO.Print("[ "); 
+        IO.Print(values[1]); IO.Print(", "); IO.Print(values[4]); IO.Print(", "); IO.Print(values[7]);
+        IO.Println(" ]");
+
+        IO.Print("[ "); 
+        IO.Print(values[2]); IO.Print(", "); IO.Print(values[5]); IO.Print(", "); IO.Print(values[8]);
+        IO.Println(" ]");
+    }
+
+    public Mat3 Transposed()
+    {
+        Mat3 r(1.0);
+
+        r.values[0] = values[0];
+        r.values[1] = values[3];
+        r.values[2] = values[6];
+
+        r.values[3] = values[1];
+        r.values[4] = values[4];
+        r.values[5] = values[7];
+
+        r.values[6] = values[2];
+        r.values[7] = values[5];
+        r.values[8] = values[8];
+
+        return r;
+    }
+
+    public static Mat3 CreateIdentity()
+    {
+        return Mat3(1.0);
+    }
+
+    public static Mat3 CreateRotation(real32 deg)
+    {
+        real32 rad = Math.DegToRad(deg);
+        real32 cosRad = Math.Cos(rad);
+        real32 sinRad = Math.Sin(rad);
+
+        Mat3 r(1.0);
+        r.values[0] = cosRad;
+        r.values[1] = sinRad;
+        r.values[3] = -sinRad;
+        r.values[4] = cosRad;
+
+        return r;
+    }
+
+    public real32 values[9];
+};
+
+class Mat4
+{
+    public Mat4(real32 m00, real32 m01, real32 m02, real32 m03,
+                real32 m10, real32 m11, real32 m12, real32 m13,
+                real32 m20, real32 m21, real32 m22, real32 m23,
+                real32 m30, real32 m31, real32 m32, real32 m33)
+    {
+        values[0]  = m00; values[1]  = m10; values[2]  = m20; values[3]  = m30;
+        values[4]  = m01; values[5]  = m11; values[6]  = m21; values[7]  = m31;
+        values[8]  = m02; values[9]  = m12; values[10] = m22; values[11] = m32;
+        values[12] = m03; values[13] = m13; values[14] = m23; values[15] = m33;
+    }
+
+    public Mat4(real32 diagonal)
+    {
+        values[0]  = diagonal;  values[1]  = 0.0;       values[2]  = 0.0;       values[3]  = 0.0;
+        values[4]  = 0.0;       values[5]  = diagonal;  values[6]  = 0.0;       values[7]  = 0.0;
+        values[8]  = 0.0;       values[9]  = 0.0;       values[10] = diagonal;  values[11] = 0.0;
+        values[12] = 0.0;       values[13] = 0.0;       values[14] = 0.0;       values[15] = diagonal;
+    }
+
+    public Mat4 operator*(Mat4& mat)
+    {
+        Mat4 r(1.0);
+        r.values[0] =  values[0] * mat.values[0]  + values[4] * mat.values[1]  + values[8]  * mat.values[2]  + values[12] * mat.values[3];
+        r.values[1] =  values[1] * mat.values[0]  + values[5] * mat.values[1]  + values[9]  * mat.values[2]  + values[13] * mat.values[3];
+        r.values[2] =  values[2] * mat.values[0]  + values[6] * mat.values[1]  + values[10] * mat.values[2]  + values[14] * mat.values[3];
+        r.values[3] =  values[3] * mat.values[0]  + values[7] * mat.values[1]  + values[11] * mat.values[2]  + values[15] * mat.values[3];
+
+        r.values[4] =  values[0] * mat.values[4]  + values[4] * mat.values[5]  + values[8]  * mat.values[6]  + values[12] * mat.values[7];
+        r.values[5] =  values[1] * mat.values[4]  + values[5] * mat.values[5]  + values[9]  * mat.values[6]  + values[13] * mat.values[7];
+        r.values[6] =  values[2] * mat.values[4]  + values[6] * mat.values[5]  + values[10] * mat.values[6]  + values[14] * mat.values[7];
+        r.values[7] =  values[3] * mat.values[4]  + values[7] * mat.values[5]  + values[11] * mat.values[6]  + values[15] * mat.values[7];
+
+        r.values[8]  = values[0] * mat.values[8]  + values[4] * mat.values[9]  + values[8]  * mat.values[10] + values[12] * mat.values[11];
+        r.values[9]  = values[1] * mat.values[8]  + values[5] * mat.values[9]  + values[9]  * mat.values[10] + values[13] * mat.values[11];
+        r.values[10] = values[2] * mat.values[8]  + values[6] * mat.values[9]  + values[10] * mat.values[10] + values[14] * mat.values[11];
+        r.values[11] = values[3] * mat.values[8]  + values[7] * mat.values[9]  + values[11] * mat.values[10] + values[15] * mat.values[11];
+
+        r.values[12] = values[0] * mat.values[12] + values[4] * mat.values[13] + values[8]  * mat.values[14] + values[12] * mat.values[15];
+        r.values[13] = values[1] * mat.values[12] + values[5] * mat.values[13] + values[9]  * mat.values[14] + values[13] * mat.values[15];
+        r.values[14] = values[2] * mat.values[12] + values[6] * mat.values[13] + values[10] * mat.values[14] + values[14] * mat.values[15];
+        r.values[15] = values[3] * mat.values[12] + values[7] * mat.values[13] + values[11] * mat.values[14] + values[15] * mat.values[15];
+
+        return r;
+    }
+
+    public Vec4 operator*(Vec4& vec)
+    {
+        return Vec4(values[0] * vec.x + values[4] * vec.y + values[8]  * vec.z  + values[12] * vec.w,
+                    values[1] * vec.x + values[5] * vec.y + values[9]  * vec.z  + values[13] * vec.w,
+                    values[2] * vec.x + values[6] * vec.y + values[10] * vec.z  + values[14] * vec.w,
+                    values[3] * vec.x + values[7] * vec.y + values[11] * vec.z  + values[15] * vec.w);
+    }
+
+    public void operator=(Mat4& mat)
+    {
+        for(uint32 i = 0; i < 16; i++)
+            values[i] = mat.values[i];
+    }
+
+    public void Print()
+    {
+        IO.Print("[ ");
+        IO.Print(values[0]); IO.Print(", "); IO.Print(values[4]); IO.Print(", ");
+        IO.Print(values[8]); IO.Print(", ");  IO.Print(values[12]);
+        IO.Println(" ]");
+
+        IO.Print("[ ");
+        IO.Print(values[1]); IO.Print(", "); IO.Print(values[5]); IO.Print(", ");
+        IO.Print(values[9]); IO.Print(", ");  IO.Print(values[13]);
+        IO.Println(" ]");
+
+        IO.Print("[ ");
+        IO.Print(values[2]); IO.Print(", "); IO.Print(values[6]); IO.Print(", ");
+        IO.Print(values[10]); IO.Print(", "); IO.Print(values[14]);
+        IO.Println(" ]");
+
+        IO.Print("[ ");
+        IO.Print(values[3]); IO.Print(", "); IO.Print(values[7]); IO.Print(", ");
+        IO.Print(values[11]); IO.Print(", "); IO.Print(values[15]);
+        IO.Println(" ]");
+    }
+
+    public Mat4 Transposed()
+    {
+        Mat4 r(0.0f);
+
+        r.values[0]  = values[0];
+        r.values[1]  = values[4];
+        r.values[2]  = values[8];
+        r.values[3]  = values[12];
+
+        r.values[4]  = values[1];
+        r.values[5]  = values[5];
+        r.values[6]  = values[9];
+        r.values[7]  = values[13];
+
+        r.values[8]  = values[2];
+        r.values[9]  = values[6];
+        r.values[10] = values[10];
+        r.values[11] = values[14];
+
+        r.values[12] = values[3];
+        r.values[13] = values[7];
+        r.values[14] = values[11];
+        r.values[15] = values[15];
+
+        return r;
+    }
+
+    public static Mat4 CreateIdentity()
+    {
+        return Mat4(1.0);
+    }
+
+    public static Mat4 CreateOrthographic(real32 left, real32 right, real32 bottom, real32 top, real32 near, real32 far)
+    {
+        Mat4 r(1.0f);
+
+        r.values[0]  = 2.0 / (right - left);
+        r.values[5]  = 2.0 / (top - bottom);
+        r.values[10] = -2.0 / (far - near);
+
+        r.values[12] = -(right + left) / (right - left);
+        r.values[13] = -(top + bottom) / (top - bottom);
+        r.values[14] = -(far + near) / (far - near);
+
+        return r;
+    }
+
+    public static Mat4 CreatePerspective(real32 width, real32 height, real32 fov, real32 znear, real32 zfar)
+    {
+        real32 ar = width / height;
+        real32 tanHalfFov = Math.Tan(Math.DegToRad(fov) * 0.5);
+        real32 zrange = znear - zfar;
+
+        Mat4 r(1.0);
+
+        r.values[0]  = 1.0 / (ar * tanHalfFov);
+        r.values[5]  = -1.0 / tanHalfFov;
+        r.values[10] = (-znear - zfar) / zrange;
+        r.values[11] = 1.0;
+
+        r.values[14] = (2.0 * zfar * znear) / zrange; 
+        r.values[15] = 0.0;
+
+        return r;
+    }
+
+    public static Mat4 CreateTranslation(Vec3& translation)
+    {
+        Mat4 r(1.0);
+
+        r.values[12] = translation.x; // col 3, row 0
+        r.values[13] = translation.y; // col 3, row 1
+        r.values[14] = translation.z; // col 3, row 2
+
+        return r;
+    }
+
+    public static Mat4 CreateScale(Vec3& scale)
+    {
+        Mat4 r(1.0);
+
+        r.values[0]  = scale.x; // col 0, row 0
+        r.values[5]  = scale.y; // col 1, row 1
+        r.values[10] = scale.z; // col 2, row 2
+
+        return r;
+    }
+
+    public static Mat4 CreateRotationX(real32 deg)
+    {
+        real32 rad = Math.DegToRad(deg);
+        real32 cosRad = Math.Cos(rad);
+        real32 sinRad = Math.Sin(rad);
+
+        Mat4 r(1.0f);
+
+        r.values[5]  = cosRad;   // col 1, row 1
+        r.values[6]  = sinRad;   // col 1, row 2
+        r.values[9]  = -sinRad;  // col 2, row 1
+        r.values[10] = cosRad;   // col 2, row 2
+
+        return r;
+    }
+
+    public static Mat4 CreateRotationY(real32 deg)
+    {
+        real32 rad = Math.DegToRad(deg);
+        real32 cosRad = Math.Cos(rad);
+        real32 sinRad = Math.Sin(rad);
+
+        Mat4 r(1.0f);
+
+        r.values[0]  = cosRad;   // col 0, row 0
+        r.values[2]  = -sinRad;  // col 0, row 2
+        r.values[8]  = sinRad;   // col 2, row 0
+        r.values[10] = cosRad;   // col 2, row 2
+
+        return r;
+    }
+
+    public static Mat4 CreateRotationZ(real32 deg)
+    {
+        real32 rad = Math.DegToRad(deg);
+        real32 cosRad = Math.Cos(rad);
+        real32 sinRad = Math.Sin(rad);
+
+        Mat4 r(1.0);
+
+        r.values[0] = cosRad;
+        r.values[1] = sinRad;
+        r.values[4] = -sinRad;
+        r.values[5] = cosRad;
+
+        return r;
+    }
+
+    public static Mat4 CreateRotation(Vec3& axis)
+    {
+        Mat4 rotX = CreateRotationX(axis.x);
+        Mat4 rotY = CreateRotationY(axis.y);
+        Mat4 rotZ = CreateRotationZ(axis.z);
+
+       return rotX * (rotY * rotZ);
+    }
+
+    public static Mat4 CreateTransformation(Vec3& translation, Vec3& scale, Vec3& rot)
+    {
+        Mat4 mtranslation = CreateTranslation(translation);
+        Mat4 mscale = CreateScale(scale);
+        Mat4 mrot = CreateRotation(rot);
+
+        return mtranslation * (mscale * mrot);
+    }
+
+    public real32 values[16];
+};

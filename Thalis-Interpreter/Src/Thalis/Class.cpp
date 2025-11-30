@@ -39,6 +39,11 @@ void Class::AddFunction(Function* function)
 	{
 		m_CopyConstructor = function;
 	}
+
+	if (function->name == m_BaseName && function->parameters.empty())
+	{
+		m_DefaultConstructor = function;
+	}
 }
 
 Function* Class::GetFunction(uint16 id)
@@ -65,7 +70,7 @@ static int32 GetConversionScore(Program* program, const TypeInfo& from, const Ty
 		std::vector<ASTExpression*> args;
 		args.push_back(new ASTExpressionDummy(from));
 		std::vector<uint16> cf;
-		uint16 functionID = toClass->GetFunctionID(toClass->GetName(), args, cf);
+		uint16 functionID = toClass->GetFunctionID(toClass->GetName(), args, cf, false);
 		if (functionID == INVALID_ID) return -1;
 		*castFunctionID = functionID;
 		return 2;
