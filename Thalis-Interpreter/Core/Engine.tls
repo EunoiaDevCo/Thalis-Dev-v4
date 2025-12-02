@@ -2,6 +2,7 @@ Import "Core/Application.tls"
 Import "Rendering/Display.tls"
 Import "DataStructures/String.tls"
 Import "Rendering/BatchRenderer.tls"
+Import "Rendering/AssetManager.tls"
 
 class Engine
 {
@@ -11,6 +12,7 @@ class Engine
         s_Application = app;
         s_Running = false;
         s_Renderer = new BatchRenderer(s_Display.GetHandle(), 10000);
+        s_AssetManager = AssetManager();
     }
 
     public static void Start()
@@ -48,12 +50,18 @@ class Engine
 
     private static void Render()
     {
+        s_Renderer->BeginFrame();
         s_Application->Render();
+        s_Renderer->EndFrame();
+        s_Renderer->RenderFrame();
         s_Display.Present();
     }
+
+    public static BatchRenderer* GetRenderer() { return s_Renderer; }
 
     private static Display s_Display;
     private static Application* s_Application;
     private static bool s_Running = false;
     private static BatchRenderer* s_Renderer;
+    private static AssetManager s_AssetManager;
 };

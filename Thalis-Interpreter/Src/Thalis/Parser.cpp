@@ -242,14 +242,14 @@ bool Parser::ParseClass(Tokenizer* tokenizer)
 		break;
 	}
 
-	if (!cls->HasAssignSTFunction())
-	{
-		cls->AddFunction(GenerateDefaultCopyFunction(cls, "operator="));
-	}
-
 	if (!cls->HasCopyConstructor())
 	{
 		cls->AddFunction(GenerateDefaultCopyFunction(cls, className));
+	}
+
+	if (!cls->HasAssignSTFunction())
+	{
+		cls->AddFunction(GenerateDefaultCopyFunction(cls, "operator="));
 	}
 
 	return true;

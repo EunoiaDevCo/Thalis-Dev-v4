@@ -1,19 +1,21 @@
 Import "Core/Application.tls"
+Import "Core/Engine.tls"
 
 class Game -> inherit[Application]
 {
     public virtual void Init()
     {
-        IO.Println("Heyo");
+        
     }
 
     public virtual void Update(real32 dt)
     {
-
+        
     }
 
     public virtual void Render()
     {
-
+        BatchRenderer* renderer = Engine.GetRenderer();
+        //renderer->SubmitSprite(Vec2(0.0, 0.0), 0.0, Vec2(0.5, 0.5), Vec4(0.0, 1.0, 1.0, 1.0));
     }
 };

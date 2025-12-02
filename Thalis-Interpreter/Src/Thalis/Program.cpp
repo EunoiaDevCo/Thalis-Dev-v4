@@ -1006,11 +1006,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 		Value variable = m_Stack.back(); m_Stack.pop_back();
 		Value assignValue = m_Stack.back(); m_Stack.pop_back();
 
-		if (variable.type == 150)
-		{
-			uint32 bp = 0;
-		}
-
 		if (assignFunctionID == INVALID_ID)
 		{
 			if (!variable.IsPrimitive())
@@ -1080,6 +1075,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		uint8 returnInfo = ReadUInt8();
 		Frame* frame = m_FrameStack.back(); m_FrameStack.pop_back();
 		CallFrame callFrame = m_CallStack.back(); m_CallStack.pop_back();
+		m_ProgramCounter = callFrame.returnPC;
 		
 		if (callFrame.popThisStack)
 			m_ThisStack.pop_back();
@@ -1169,7 +1165,6 @@ void Program::ExecuteOpCode(OpCode opcode)
 			}
 		}
 
-		m_ProgramCounter = callFrame.returnPC;
 		m_FramePool.Release(frame);
 	} break;
 	case OpCode::MEMBER_FUNCTION_CALL: {

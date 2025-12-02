@@ -3,6 +3,7 @@ Import Mem;
 Import "Math/Matrix.tls"
 Import "DataStructures/List.tls"
 Import "Rendering/Shader.tls"
+Import "Rendering/AssetManager.tls"
 
 class Vertex2D
 {
@@ -107,7 +108,6 @@ class BatchRenderer
     public void SubmitSprite(Sprite& sprite)
     {
         SubmitedSprite s;
-
         Mat3 transform = Mat3.CreateRotation(sprite.rot);
 
         Vec2 texCoord_bl(0.0, 1.0);
@@ -138,6 +138,7 @@ class BatchRenderer
             s.topRight.textureIndex = 0.0;
             s.bottomRight.textureIndex = 0.0;
             m_ColoredSprites.Push(s);
+
             return;
         }
         else
@@ -221,7 +222,7 @@ class BatchRenderer
         uint32 currentVertexOffset = m_ColoredSprites.Size() * 4;
         for(uint32 i = 0; i < m_NumSpriteGroups; i++)
         {
-            SpriteGroup* group = &m_SpriteGroups[i];
+            SpriteGroup& group = m_SpriteGroups[i];
             group.vertexOffset = currentVertexOffset;
             group.indexCount = group.sprites.Size() * 6;
 
@@ -231,6 +232,30 @@ class BatchRenderer
 
         GL.glUnmapBuffer(GL.GL_ARRAY_BUFFER);
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0);
+    }
+
+    public void RenderFrame()
+    {
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT);
+        GL.glBindVertexArray(m_VAO);
+
+        m_SpriteShader.Bind();
+        m_SpriteShader.SetUniform("ViewProjection", m_ViewProjection);
+
+        if(!m_ColoredSprites.Empty())
+        {
+            m_SpriteShader.BindTexture("Textures", AssetManager.WHITE_TEXTURE);
+            GL.glDrawElements(GL.GL_TRIANGLES, m_ColoredSprites.Size() * 6, GL.GL_UNSIGNED_INT, 0);
+        }
+
+        for(uint32 i = 0; i < m_NumSpriteGroups; i++)
+        {
+            SpriteGroup* group = &m_SpriteGroups[i];
+            m_SpriteShader.BindArrayOfTextures("Textures", group.textures, group.numTextures);
+            GL.glDrawElementsBaseVertex(GL.GL_TRIANGLES, group.indexCount, GL.GL_UNSIGNED_INT, 0, group.vertexOffset);
+        }
+
+        GL.glBindVertexArray(0);
     }
 
     private void InitBuffers(uint32 maxSprites)

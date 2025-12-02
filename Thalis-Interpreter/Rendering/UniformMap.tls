@@ -36,6 +36,7 @@ class UniformMap
         UniformMapElement element;
         element.name = name;
         element.location = location;
+
         m_UniformLocations.Push(element);
     }
 

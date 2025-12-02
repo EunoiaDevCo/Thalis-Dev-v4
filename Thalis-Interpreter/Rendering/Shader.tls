@@ -92,7 +92,6 @@ class Shader
             int32 secondSpaceIndex = code.FindFirstOf(" ", uniformTypeIndex);
             int32 semicolonIndex = code.FindFirstOf(";", secondSpaceIndex);//"
 
-
             String uniformTypeName = code.SubString(uniformTypeIndex, secondSpaceIndex - 1).Trim();
             String uniformName = code.SubString(secondSpaceIndex + 1, semicolonIndex - 1).Trim();
    
