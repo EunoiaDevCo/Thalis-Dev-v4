@@ -361,7 +361,7 @@ bool Parser::ParseFunction(Tokenizer* tokenizer, Class* cls)
 
 			if (function->returnTemplateTypeName.empty())
 			{
-				COMPILE_ERROR(t.line, t.column, "Invalid return type", false);
+				return false;
 			}
 		}
 
@@ -970,6 +970,13 @@ bool Parser::ParseStatement(Function* function, Tokenizer* tokenizer)
 			function->body.push_back(expr);
 			return true;
 		}
+	}
+	else if (t.type == TokenTypeT::BREAKPOINT)
+	{
+		ASTExpressionBreakPoint* breakPointExpr = new ASTExpressionBreakPoint();
+		if (tokenizer->Expect(TokenTypeT::SEMICOLON, &t)) COMPILE_ERROR(t.line, t.length, "Expected ';' after breakpoint", false);
+		function->body.push_back(breakPointExpr);
+		return true;
 	}
 	else if (t.type == TokenTypeT::IF)
 	{
@@ -1844,6 +1851,22 @@ ASTExpression* Parser::ParsePrimary(Tokenizer* tokenizer)
 
 		ASTExpressionOffsetOf* offsetofExpr = new ASTExpressionOffsetOf(type, members);
 		return offsetofExpr;
+	}
+	else if (t.type == TokenTypeT::INT_TO_STR)
+	{
+		if (tokenizer->Expect(TokenTypeT::OPEN_PAREN)) COMPILE_ERROR(t.line, t.column, "Expected '(' after int_to_str", nullptr);;
+		ASTExpression* expr = ParseExpression(tokenizer);
+		if (tokenizer->Expect(TokenTypeT::CLOSE_PAREN, &t)) COMPILE_ERROR(t.line, t.column, "Expected ')' after int_to_str expression", nullptr);
+		ASTExpressionIntToStr* intToStrExpr = new ASTExpressionIntToStr(expr);
+		return intToStrExpr;
+	}
+	else if (t.type == TokenTypeT::STR_TO_INT)
+	{
+		if (tokenizer->Expect(TokenTypeT::OPEN_PAREN)) COMPILE_ERROR(t.line, t.column, "Expected '(' after str_to_int", nullptr);;
+		ASTExpression* expr = ParseExpression(tokenizer);
+		if (tokenizer->Expect(TokenTypeT::CLOSE_PAREN, &t)) COMPILE_ERROR(t.line, t.column, "Expected ')' after str_to_int expression", nullptr);
+		ASTExpressionStrToInt* strToIntExpr = new ASTExpressionStrToInt(expr);
+		return strToIntExpr;
 	}
 	else if (t.type == TokenTypeT::IDENTIFIER || t.type == TokenTypeT::THIS)
 	{
@@ -3266,6 +3289,7 @@ Function* Parser::GenerateDefaultCopyFunction(Class* cls, const std::string& nam
 					Operator::LESS);
 
 				ASTExpressionUnaryUpdate* incrExpr = new ASTExpressionUnaryUpdate(new ASTExpressionPushLocal(idx, TypeInfo((uint16)ValueType::UINT32, 0), ""), ASTUnaryUpdateOp::PRE_INC);
+				incrExpr->isStatement = true;
 
 				std::vector<ASTExpression*> bodyBlock = { loopBody };
 

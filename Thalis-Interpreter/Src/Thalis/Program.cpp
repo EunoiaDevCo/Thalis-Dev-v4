@@ -332,6 +332,8 @@ void Program::AddAritmaticCommand(Operator op, uint16 functionID)
 	case Operator::GREATER: WriteOPCode(OpCode::GREATER); break;
 	case Operator::LESS_EQUALS: WriteOPCode(OpCode::LESS_EQUAL); break;
 	case Operator::GREATER_EQUALS: WriteOPCode(OpCode::GREATER_EQUAL); break;
+	case Operator::LOGICAL_AND: WriteOPCode(OpCode::LOGICAL_AND); break;
+	case Operator::LOGICAL_OR: WriteOPCode(OpCode::LOGICAL_OR); break;
 	}
 
 	WriteUInt16(functionID);
@@ -674,6 +676,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 			callFrame.popThisStack = true;
 			callFrame.usesReturnValue = true;
 			callFrame.loopCount = m_LoopStack.size();
+			callFrame.function = function;
 
 			m_CurrentScope++;
 			m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -942,6 +945,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 			callFrame.popThisStack = true;
 			callFrame.usesReturnValue = false;
 			callFrame.loopCount = m_LoopStack.size();
+			callFrame.function = function;
 
 			m_CurrentScope++;
 			m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1002,6 +1006,11 @@ void Program::ExecuteOpCode(OpCode opcode)
 		Value variable = m_Stack.back(); m_Stack.pop_back();
 		Value assignValue = m_Stack.back(); m_Stack.pop_back();
 
+		if (variable.type == 150)
+		{
+			uint32 bp = 0;
+		}
+
 		if (assignFunctionID == INVALID_ID)
 		{
 			if (!variable.IsPrimitive())
@@ -1051,6 +1060,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		callFrame.popThisStack = false;
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = function;
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1074,6 +1084,49 @@ void Program::ExecuteOpCode(OpCode opcode)
 		if (callFrame.popThisStack)
 			m_ThisStack.pop_back();
 
+		m_LoopStack.resize(callFrame.loopCount);
+
+		Value returnValue = Value::MakeNULL();
+		uint64 returnMarker = m_ReturnAllocator->GetMarker();
+		bool addToScope = false;
+		if (returnInfo == 1) //Returns value
+		{
+			if (callFrame.usesReturnValue)
+			{
+				returnValue = m_Stack.back().Actual();
+				if (!returnValue.IsPrimitive() && !returnValue.IsPointer())
+				{
+					Class* cls = GetClass(returnValue.type);
+					Function* copyConstructor = cls->GetCopyConstructor();
+					Value dst = Value::MakeObject(this, returnValue.type, m_ReturnAllocator);
+					uint32 ccount = m_PendingCopyConstructors.size();
+					addToScope = true;
+					if (copyConstructor)
+					{
+						m_PendingCopyConstructors.push_back({ dst, returnValue, copyConstructor });
+					}
+					else
+					{
+						AddCopyConstructorRecursive(dst, returnValue);
+					}
+
+					ExecutePendingCopyConstructors(ccount);
+					returnValue = dst;
+				}
+				else
+				{
+					returnValue = returnValue.Clone(this, m_ReturnAllocator);
+				}
+			}
+
+			m_Stack.pop_back();
+		}
+		else if (returnInfo == 2)//Returns reference
+		{
+			returnValue = m_Stack.back();
+			m_Stack.pop_back();
+		}
+
 		uint32 dcount = m_PendingDestructors.size();
 
 		uint64 freeMarker = m_ScopeStack[callFrame.scopeCount].marker;
@@ -1087,25 +1140,12 @@ void Program::ExecuteOpCode(OpCode opcode)
 			scope.objects.clear();
 		}
 		m_CurrentScope = callFrame.scopeCount - 1;
+
 		ExecutePendingDestructors(dcount);
 
-		m_LoopStack.resize(callFrame.loopCount);
-
-		Value returnValue = Value::MakeNULL();
-		uint64 returnMarker = m_ReturnAllocator->GetMarker();
-		if (returnInfo == 1) //Returns value
+		if (callFrame.function->name == "Shader")
 		{
-			if (callFrame.usesReturnValue)
-			{
-				returnValue = m_Stack.back().Actual().Clone(this, m_ReturnAllocator);
-			}
-
-			m_Stack.pop_back();
-		}
-		else if (returnInfo == 2)//Returns reference
-		{
-			returnValue = m_Stack.back();
-			m_Stack.pop_back();
+			uint32 bp = 0;
 		}
 
 		m_StackAllocator->FreeToMarker(freeMarker);
@@ -1121,6 +1161,11 @@ void Program::ExecuteOpCode(OpCode opcode)
 				Value value = returnValue.Clone(this, m_StackAllocator);
 				m_ReturnAllocator->FreeToMarker(returnMarker);
 				m_Stack.push_back(value);
+
+				if (addToScope)
+				{
+					m_ScopeStack[m_CurrentScope].objects.push_back(value);
+				}
 			}
 		}
 
@@ -1142,6 +1187,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		callFrame.popThisStack = true;
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = function;
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1174,6 +1220,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		callFrame.popThisStack = true;
 		callFrame.usesReturnValue = usesReturnValue;
 		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = function;
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1210,6 +1257,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 		callFrame.popThisStack = true;
 		callFrame.usesReturnValue = false;
 		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = function;
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1495,7 +1543,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 				m_Stack.push_back(clone);
 		} break;
 		case 3: { //Post-dec
-			Value value = m_Stack.back();
+			Value value = m_Stack.back(); m_Stack.pop_back();
 			Value clone = pushToStack ? value.Clone(this, m_StackAllocator) : Value::MakeNULL();
 			value.Decrement();
 			if (pushToStack)
@@ -1554,6 +1602,7 @@ void Program::ExecuteOpCode(OpCode opcode)
 			callFrame.popThisStack = true;
 			callFrame.usesReturnValue = false;
 			callFrame.loopCount = m_LoopStack.size();
+			callFrame.function = function;
 
 			m_CurrentScope++;
 			m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1673,24 +1722,48 @@ void Program::ExecuteOpCode(OpCode opcode)
 		m_Stack.push_back(Value::MakeUInt32(length, m_StackAllocator));
 	} break;
 	case OpCode::PLUS_EQUALS: {
-		Value increment = m_Stack.back(); m_Stack.pop_back();
-		Value value = m_Stack.back(); m_Stack.pop_back();
+		Value increment = m_Stack.back();
+		m_Stack.pop_back();
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
 		value.PlusEquals(increment);
 	} break;
 	case OpCode::MINUS_EQUALS: {
-		Value increment = m_Stack.back(); m_Stack.pop_back();
-		Value value = m_Stack.back(); m_Stack.pop_back();
+		Value increment = m_Stack.back();
+		m_Stack.pop_back();
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
 		value.MinusEquals(increment);
 	} break;
 	case OpCode::TIMES_EQUALS: {
-		Value increment = m_Stack.back(); m_Stack.pop_back();
-		Value value = m_Stack.back(); m_Stack.pop_back();
+		Value increment = m_Stack.back();
+		m_Stack.pop_back();
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
 		value.TimesEquals(increment);
 	} break;
 	case OpCode::DIVIDE_EQUALS: {
-		Value increment = m_Stack.back(); m_Stack.pop_back();
-		Value value = m_Stack.back(); m_Stack.pop_back();
+		Value increment = m_Stack.back();
+		m_Stack.pop_back();
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
 		value.DivideEquals(increment);
+	} break;
+	case OpCode::INT_TO_STR: {
+		Value value = m_Stack.back();
+		m_Stack.pop_back();
+		Value str = Value::MakeCStr(std::to_string(value.GetInt64()), m_StackAllocator);
+		str = Value::MakePointer((uint16)ValueType::CHAR, 1, str.data, m_StackAllocator);
+		m_Stack.push_back(str);
+	} break;
+	case OpCode::BREAK_POINT: {
+		uint32 bp = 0;
+	} break;
+	case OpCode::STR_TO_INT: {
+		Value strValue = m_Stack.back();
+		m_Stack.pop_back();
+		Value intValue = Value::MakeInt64(std::atoi((char*)*(void**)strValue.data), m_StackAllocator);
+		m_Stack.push_back(intValue);
 	} break;
 	}
 }
@@ -1732,6 +1805,7 @@ void Program::ExecuteAssignFunction(const Value& dstValue, const Value& assignVa
 	callFrame.popThisStack = true;
 	callFrame.usesReturnValue = false;
 	callFrame.loopCount = m_LoopStack.size();
+	callFrame.function = function;
 
 	m_CurrentScope++;
 	m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1753,6 +1827,12 @@ void Program::ExecuteAssignFunction(const Value& dstValue, const Value& assignVa
 	while (m_ProgramCounter != callFrame.returnPC)
 	{
 		OpCode innerOpCode = ReadOPCode();
+
+		if (innerOpCode == OpCode::UNARY_UPDATE)
+		{
+			uint32 bp = 0;
+		}
+
 		if (innerOpCode == OpCode::END) break;
 		ExecuteOpCode(innerOpCode);
 	}
@@ -1765,6 +1845,7 @@ void Program::ExecuteArithmaticFunction(const Value& lhs, const Value& rhs, Func
 	callFrame.popThisStack = true;
 	callFrame.usesReturnValue = true;
 	callFrame.loopCount = m_LoopStack.size();
+	callFrame.function = function;
 
 	m_CurrentScope++;
 	m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1790,6 +1871,7 @@ void Program::ExecuteCastFunction(const Value& dstValue, const Value& srcValue, 
 	callFrame.popThisStack = true;
 	callFrame.usesReturnValue = false;
 	callFrame.loopCount = m_LoopStack.size();
+	callFrame.function = function;
 
 	m_CurrentScope++;
 	m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -1935,6 +2017,7 @@ void Program::ExecutePendingDestructors(uint32 offset)
 		callFrame.popThisStack = true;
 		callFrame.usesReturnValue = false;
 		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = destructor;
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
@@ -2027,13 +2110,13 @@ void Program::ExecutePendingConstructors(uint32 offset)
 		callFrame.popThisStack = true;
 		callFrame.usesReturnValue = false;
 		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = constructor;
 
 		m_CurrentScope++;
 		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
 		callFrame.scopeCount = m_CurrentScope;
 
 		Frame* frame = m_FramePool.Acquire(constructor->numLocals);
-		AddFunctionArgsToFrame(frame, constructor);
 
 		callFrame.returnPC = m_ProgramCounter;
 
@@ -2053,6 +2136,81 @@ void Program::ExecutePendingConstructors(uint32 offset)
 	}
 
 	m_PendingConstructors.resize(offset);
+}
+
+void Program::AddCopyConstructorRecursive(const Value& dst, const Value& src)
+{
+	Class* cls = GetClass(dst.type);
+	const std::vector<ClassField>& members = cls->GetMemberFields();
+	for (uint32 i = 0; i < members.size(); i++)
+	{
+		const TypeInfo& memberType = members[i].type;
+		uint64 memberOffset = members[i].offset;
+		if (Value::IsPrimitiveType(memberType.type) || memberType.pointerLevel > 0)
+			continue;
+
+		Value dstMember = Value::MakeNULL(memberType.type, 0);
+		Value srcMember = Value::MakeNULL(memberType.type, 0);
+
+		dstMember.data = (uint8*)dst.data + memberOffset;
+		srcMember.data = (uint8*)src.data + memberOffset;
+
+		Class* memberClass = GetClass(memberType.type);
+		Function* copyConstructor = memberClass->GetCopyConstructor();
+		if (copyConstructor)
+		{
+			m_PendingCopyConstructors.push_back({ dstMember, srcMember, copyConstructor });
+		}
+		else
+		{
+			AddCopyConstructorRecursive(dstMember, srcMember);
+		}
+	}
+}
+
+void Program::ExecutePendingCopyConstructors(uint32 offset)
+{
+	for (uint32 i = offset; i < m_PendingCopyConstructors.size(); i++)
+	{
+		const PendingCopyConstructor& cc = m_PendingCopyConstructors[i];
+		const Value& dst = cc.dst;
+		const Value& src = cc.src;
+		Function* function = cc.constructor;
+
+		m_Stack.push_back(src);
+
+		CallFrame callFrame;
+		callFrame.basePointer = m_Stack.size();
+		callFrame.popThisStack = true;
+		callFrame.usesReturnValue = false;
+		callFrame.loopCount = m_LoopStack.size();
+		callFrame.function = function;
+
+		m_CurrentScope++;
+		m_ScopeStack[m_CurrentScope].marker = m_StackAllocator->GetMarker();
+		callFrame.scopeCount = m_CurrentScope;
+
+		Frame* frame = m_FramePool.Acquire(function->numLocals);
+		AddFunctionArgsToFrame(frame, function, false);
+
+		callFrame.returnPC = m_ProgramCounter;
+
+		m_ThisStack.push_back(Value::MakePointer(dst.type, 1, dst.data, m_StackAllocator));
+
+		m_CallStack.push_back(callFrame);
+		m_FrameStack.push_back(frame);
+
+		m_ProgramCounter = function->pc;
+
+		while (m_ProgramCounter != callFrame.returnPC)
+		{
+			OpCode innerOpCode = ReadOPCode();
+			if (innerOpCode == OpCode::END) break;
+			ExecuteOpCode(innerOpCode);
+		}
+	}
+
+	m_PendingCopyConstructors.resize(offset);
 }
 
 void Program::CleanUpForExecution()

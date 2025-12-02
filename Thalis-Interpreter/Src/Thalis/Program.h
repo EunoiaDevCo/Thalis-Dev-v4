@@ -43,11 +43,11 @@ enum class OpCode
 	MODULE_CONSTANT, MEMBER_FUNCTION_CALL, CONSTRUCTOR_CALL, VIRTUAL_FUNCTION_CALL,
 	MODULE_FUNCTION_CALL, STATIC_FUNCTION_CALL, RETURN, NEW, NEW_ARRAY,
 
-	STRLEN,
+	STRLEN, INT_TO_STR, STR_TO_INT,
 
 	DELETE, DELETE_ARRAY,
 
-	JUMP, JUMP_IF_FALSE,
+	JUMP, JUMP_IF_FALSE, BREAK_POINT,
 
 	END
 };
@@ -60,6 +60,7 @@ struct CallFrame
 	bool popThisStack;
 	uint32 loopCount;
 	uint32 scopeCount;
+	Function* function;
 };
 
 struct ScopeInfo
@@ -78,6 +79,13 @@ struct LoopFrame
 	uint32 startPC;
 	uint32 endPC;
 	uint32 scopeCount;
+};
+
+struct PendingCopyConstructor
+{
+	Value dst;
+	Value src;
+	Function* constructor;
 };
 
 class Class;
@@ -183,6 +191,8 @@ public:
 	inline void AddCreatedExpression(ASTExpression* expr) { m_CreatedExpressions.push_back(expr); }
 
 	inline Frame* GetFrame(uint32 frameIndex) { return m_FrameStack[frameIndex]; }
+
+	inline Value StackBack() const { return m_Stack.back(); }
 public:
 	static Program* GetCompiledProgram();
 private:
@@ -194,12 +204,12 @@ private:
 	void ExecuteCastFunction(const Value& dstValue, const Value& srcValue, Function* function);
 
 	void AddFunctionArgsToFrame(Frame* frame, Function* function, bool readCastFunctionID = true);
-
 	void AddDestructorRecursive(const Value& value);
 	void ExecutePendingDestructors(uint32 offset);
-
 	void AddConstructorRecursive(const Value& value, bool addValue = false);
 	void ExecutePendingConstructors(uint32 offset);
+	void AddCopyConstructorRecursive(const Value& dst, const Value& src);
+	void ExecutePendingCopyConstructors(uint32 offset);
 
 	void CleanUpForExecution();
 	void InitStatics();
@@ -246,6 +256,7 @@ private:
 
 	std::vector<Value> m_PendingDestructors;
 	std::vector<std::pair<Value, Function*>> m_PendingConstructors;
+	std::vector<PendingCopyConstructor> m_PendingCopyConstructors;
 
 	std::vector<ASTExpression*> m_CreatedExpressions;
 };

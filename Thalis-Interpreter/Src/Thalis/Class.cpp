@@ -253,7 +253,7 @@ void Class::EmitCode(Program* program)
 		}
 		if (function->returnInfo.type == (uint16)ValueType::VOID_T)
 		{
-			program->AddReturnCommand(false);
+			program->AddReturnCommand(0);
 		}
 	}
 }

@@ -403,6 +403,8 @@ Token Tokenizer::GetToken()
 				token.type = TokenTypeT::INT_TO_STR;
 			else if (StringEqual(token.text, token.length, "offsetof", 8))
 				token.type = TokenTypeT::OFFSETOF;
+			else if (StringEqual(token.text, token.length, "breakpoint", 10))
+				token.type = TokenTypeT::BREAKPOINT;
 		}
 		else if (IsNumber(at[0]))
 		{

@@ -182,7 +182,7 @@ class String
                 break;
             }
         }
-
+   
         return SubString(newBeginning);
     }
 
@@ -218,7 +218,7 @@ class String
         return m_Chars;
     }
 
-    public bool Equals(String& str)
+    public bool operator==(String& str)
     {
         if(m_Length != str.m_Length)
             return false;

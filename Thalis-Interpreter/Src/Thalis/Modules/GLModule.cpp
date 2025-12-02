@@ -558,8 +558,8 @@ Value GLModule::CallFunction(Program* program, uint16 function, const std::vecto
     case GLModuleFunction::TGL_GET_SHADER_INFO_LOG: {
         GLuint shader = (GLuint)args[0].GetUInt32();
         GLsizei bufSize = (GLsizei)args[1].GetInt32();
-        GLsizei* length = (GLsizei*)*(void**)args[2].data;
-        GLchar* infoLog = (GLchar*)*(void**)args[3].data;
+        GLsizei* length = args[2].data == nullptr ? nullptr : (GLsizei*)*(void**)args[2].data;
+        GLchar* infoLog = (GLchar*)args[3].data;
 
         glGetShaderInfoLog(shader, bufSize, length, infoLog);
         return Value::MakeNULL();
@@ -576,8 +576,8 @@ Value GLModule::CallFunction(Program* program, uint16 function, const std::vecto
     case GLModuleFunction::TGL_GET_PROGRAM_INFO_LOG: {
         GLuint prog = (GLuint)args[0].GetUInt32();
         GLsizei bufSize = (GLsizei)args[1].GetInt32();
-        GLsizei* length = (GLsizei*)*(void**)args[2].data;
-        GLchar* infoLog = (GLchar*)*(void**)args[3].data;
+        GLsizei* length = args[2].data == nullptr ? nullptr : (GLsizei*)*(void**)args[2].data;
+        GLchar* infoLog = (GLchar*)args[3].data;
 
         glGetProgramInfoLog(prog, bufSize, length, infoLog);
         return Value::MakeNULL();

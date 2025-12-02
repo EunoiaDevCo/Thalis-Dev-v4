@@ -1,0 +1,185 @@
+Import FS;
+Import GL;
+Import IO;
+Import Mem;
+Import "Rendering/UniformMap.tls"
+Import "Math/Matrix.tls"
+
+class Shader
+{
+    public Shader(String& vertexPath, String& fragmentPath)
+    {
+        m_CurrentTextureUnit = 0;
+
+        char* vertexCode_ = FS.ReadTextFile(vertexPath.Str());
+        char* fragmentCode_ = FS.ReadTextFile(fragmentPath.Str());
+
+        String vertexCode = vertexCode_;
+        String fragmentCode = fragmentCode_;
+
+        m_Program = GL.glCreateProgram();
+
+        uint32 vertexShader = GL.glCreateShader(GL.GL_VERTEX_SHADER);
+        GL.glShaderSource(vertexShader, vertexCode.Str());
+        GL.glCompileShader(vertexShader);
+        CheckShaderStatus(vertexShader, GL.GL_COMPILE_STATUS, false, "Error Compiling vertex shader");
+
+        uint32 fragmentShader = GL.glCreateShader(GL.GL_FRAGMENT_SHADER);
+        GL.glShaderSource(fragmentShader, fragmentCode.Str());
+        GL.glCompileShader(fragmentShader);
+        CheckShaderStatus(fragmentShader, GL.GL_COMPILE_STATUS, false, "Error Compiling fragment shader");
+
+        GL.glAttachShader(m_Program, vertexShader);
+        GL.glAttachShader(m_Program, fragmentShader);
+
+        GL.glLinkProgram(m_Program);
+        CheckShaderStatus(m_Program, GL.GL_LINK_STATUS, true, "Error linking program");
+
+        GL.glDeleteShader(vertexShader);
+        GL.glDeleteShader(fragmentShader);
+
+        ParseShader(vertexCode);
+        ParseShader(fragmentCode);
+
+        Mem.Free(vertexCode_);
+        Mem.Free(fragmentCode_);
+    }
+
+    public void Bind()
+    {
+        GL.glUseProgram(m_Program);
+    }
+
+    public void SetUniform(String& name, real32 v0) { GL.glUniform1f(m_UniformMap.GetUniformLocation(name), v0); }
+    public void SetUniform(String& name, Vec2& vec) { GL.glUniform2f(m_UniformMap.GetUniformLocation(name), vec.x, vec.y); }
+    public void SetUniform(String& name, Vec3& vec) { GL.glUniform3f(m_UniformMap.GetUniformLocation(name), vec.x, vec.y, vec.z); }
+    public void SetUniform(String& name, Vec4& vec) { GL.glUniform4f(m_UniformMap.GetUniformLocation(name), vec.x, vec.y, vec.z, vec.w); }
+    public void SetUniform(String& name, Mat4& mat) { GL.glUniformMatrix4fv(m_UniformMap.GetUniformLocation(name), 1, false, mat.values); }
+
+    public void BindTexture(String& name, uint32 handle)
+    {
+        UniformMapTexture& textureUniform = m_UniformMap.GetTexture(name);
+
+        UniformMapTextureElement* element = &textureUniform.elements[0];
+
+        GL.glActiveTexture(GL.GL_TEXTURE0 + element.textureUnit);
+        GL.glBindTexture(GL.GL_TEXTURE_2D, handle);
+        GL.glUniform1i(element.location, element.textureUnit);
+    }
+
+    public void BindArrayOfTextures(String& name, uint32* handles, uint32 length)
+    {
+        UniformMapTexture* textureUniform = m_UniformMap.GetTexture(name);
+
+        for(uint32 i = 0; i < length; i++)
+        {
+            UniformMapTextureElement& element = textureUniform.elements[i];
+            GL.glActiveTexture(GL.GL_TEXTURE0 + element.textureUnit);
+            GL.glBindTexture(GL.GL_TEXTURE_2D, handles[i]);
+            GL.glUniform1i(element.location, element.textureUnit);
+        }
+    }
+
+    private void ParseShader(String& code)
+    {
+        String uniformKeyword = "uniform";
+
+        int32 uniformIndex = code.FindFirstOf(uniformKeyword);
+        while(uniformIndex != -1)
+        {
+            int32 firstSpaceIndex = uniformIndex + 7;
+            int32 uniformTypeIndex = code.FindFirstNotOf(" ", firstSpaceIndex);
+            int32 secondSpaceIndex = code.FindFirstOf(" ", uniformTypeIndex);
+            int32 semicolonIndex = code.FindFirstOf(";", secondSpaceIndex);//"
+
+
+            String uniformTypeName = code.SubString(uniformTypeIndex, secondSpaceIndex - 1).Trim();
+            String uniformName = code.SubString(secondSpaceIndex + 1, semicolonIndex - 1).Trim();
+   
+            int32 openBracketIndex = code.FindFirstOf("[", secondSpaceIndex + 1);
+            uint32 arrayLength = 0;
+            if(openBracketIndex != -1 && (openBracketIndex < semicolonIndex))
+            {
+                int32 closeBracketIndex = code.FindFirstOf("]", openBracketIndex + 1);
+                String arrayLengthString = code.SubString(openBracketIndex + 1, closeBracketIndex - 1).Trim();
+                arrayLength = str_to_int(arrayLengthString.Str());
+                uniformName = code.SubString(secondSpaceIndex + 1, openBracketIndex - 1).Trim();
+            }
+
+            if(uniformTypeName == "sampler2D")
+            {
+                if(m_CurrentTextureUnit >= 31)
+                {
+                    IO.Println("Shader exceeds maximum texture amount of 32");
+                    return;
+                }
+
+                UniformMapTexture texture;
+                texture.name = uniformName;
+                if(arrayLength == 0)
+                {
+                    int32 location = GL.glGetUniformLocation(m_Program, uniformName.Str());
+                    int32 textureUnit = m_CurrentTextureUnit;
+                    m_CurrentTextureUnit++;
+
+                    texture.AddElement(location, textureUnit);
+                }
+                else
+                {
+                    for(uint32 i = 0; i < arrayLength; i++)
+                    {
+                        String elementName = texture.name + "[" + int_to_str(i) + "]";
+                        int32 location = GL.glGetUniformLocation(m_Program, elementName.Str());
+                        int32 textureUnit = m_CurrentTextureUnit;
+                        m_CurrentTextureUnit++;
+
+                        texture.AddElement(location, textureUnit);
+                    }
+                }
+
+                m_UniformMap.AddUniformTexture(texture);
+            }
+            else
+            {
+                int32 uniformLocation = GL.glGetUniformLocation(m_Program, uniformName.Str());
+                m_UniformMap.AddUniformLocation(uniformName, uniformLocation);
+            }
+
+            uniformIndex = code.FindFirstOf(uniformKeyword, semicolonIndex + 1);
+        }
+    }
+
+    private static bool CheckShaderStatus(uint32 shader, int32 status, bool isProgram, String& errorMsg)
+    {
+        char infoLog[512];
+
+        if(isProgram)
+        {
+            int32 success = GL.glGetProgramiv(shader, status);
+            if(!success)
+            {
+                GL.glGetProgramInfoLog(shader, 512, null, infoLog);
+                String msg = String(&infoLog[0]);
+                msg.Print();
+                return false;
+            }
+        }
+        else
+        {
+            int32 success = GL.glGetShaderiv(shader, status);
+            if(!success)
+            {
+                GL.glGetShaderInfoLog(shader, 512, null, infoLog);
+                String msg = String(&infoLog[0]);
+                msg.Print();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private uint32 m_Program;
+    UniformMap m_UniformMap;
+    private uint32 m_CurrentTextureUnit;
+};

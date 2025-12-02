@@ -2,6 +2,7 @@ Import GL;
 Import Mem;
 Import "Math/Matrix.tls"
 Import "DataStructures/List.tls"
+Import "Rendering/Shader.tls"
 
 class Vertex2D
 {
@@ -57,6 +58,8 @@ class BatchRenderer
             return;
         }
 
+        m_SpriteShader = Shader("Res/Shaders/2D/Batch.vert", "Res/Shaders/2D/Batch.frag");
+
         m_VAO = GL.glGenVertexArrays();
 
         GL.glBindVertexArray(m_VAO);
@@ -88,9 +91,177 @@ class BatchRenderer
         m_ViewProjection = m_Projection * m_View;
     }
 
-    public void InitBuffers(uint32 maxSprites)
+    public void BeginFrame()
     {
+        for(uint32 i = 0; i < m_NumSpriteGroups; i++)
+        {
+            SpriteGroup& group = m_SpriteGroups[i];
+            group.numTextures = 0;
+            group.sprites.Clear();
+        }
         
+        m_NumSpriteGroups = 0;
+        m_ColoredSprites.Clear();
+    }
+
+    public void SubmitSprite(Sprite& sprite)
+    {
+        SubmitedSprite s;
+
+        Mat3 transform = Mat3.CreateRotation(sprite.rot);
+
+        Vec2 texCoord_bl(0.0, 1.0);
+        Vec2 texCoord_tl(0.0, 0.0);
+        Vec2 texCoord_tr(1.0, 0.0);
+        Vec2 texCoord_br(1.0, 1.0);
+
+        s.bottomLeft.pos = transform * Vec2(0.0, 0.0) + sprite.pos;
+        s.bottomLeft.color = sprite.color;
+        s.bottomLeft.texCoord = texCoord_bl;
+
+        s.topLeft.pos = transform * Vec2(0.0, sprite.size.y) + sprite.pos;
+        s.topLeft.color = sprite.color;
+        s.topLeft.texCoord = texCoord_tl;
+
+        s.topRight.pos = transform * sprite.size + sprite.pos;
+        s.topRight.color = sprite.color;
+        s.topRight.texCoord = texCoord_tr;
+
+        s.bottomRight.pos = transform * Vec2(sprite.size.x, 0.0) + sprite.pos;
+        s.bottomRight.color = sprite.color;
+        s.bottomRight.texCoord = texCoord_br;
+
+        if(sprite.texture == 0)
+        {
+            s.bottomLeft.textureIndex = 0.0;
+            s.topLeft.textureIndex = 0.0;
+            s.topRight.textureIndex = 0.0;
+            s.bottomRight.textureIndex = 0.0;
+            m_ColoredSprites.Push(s);
+            return;
+        }
+        else
+        {
+            if ((sprite.spriteSheet.numCols > 1) &&
+				(sprite.spriteSheet.numRows > 1))
+			{
+
+            }
+        }
+
+        for(uint32 i = 0; i < m_NumSpriteGroups; i++)
+        {
+            SpriteGroup& group = m_SpriteGroups[i];
+            for(uint32 j = 0; j < group.numTextures; j++)
+            {
+                if(sprite.texture == group.textures[j])
+                {
+                    s.bottomLeft.textureIndex = j;
+					s.topLeft.textureIndex = j;
+					s.topRight.textureIndex = j;
+					s.bottomRight.textureIndex = j;
+
+					group.sprites.Push(s);
+					return;
+                }
+            }
+
+            if(group.numTextures < 32)
+            {
+                real32 textureIndex = group.numTextures;
+                group.numTextures++;
+
+                s.bottomLeft.textureIndex = textureIndex;
+				s.topLeft.textureIndex = textureIndex;
+				s.topRight.textureIndex = textureIndex;
+				s.bottomRight.textureIndex = textureIndex;
+
+                group.textures[textureIndex] = sprite.texture;
+                group.sprites.Push(s);
+                return;
+            }
+        }
+
+        SpriteGroup& group = m_SpriteGroups[m_NumSpriteGroups++];
+        group.numTextures = 1;
+        group.textures[0] = sprite.texture;
+        s.bottomLeft.textureIndex = 0.0;
+        s.topLeft.textureIndex = 0.0;
+        s.topRight.textureIndex = 0.0;
+        s.bottomRight.textureIndex = 0.0;
+        group.sprites.Push(s);
+    }
+
+    public void SubmitSprite(Vec2& pos, real32 rot, Vec2& size, Vec4& color, uint32 texture)
+    {
+        Sprite sprite;
+        sprite.pos = pos;
+        sprite.size = size;
+        sprite.color = color;
+        sprite.texture = texture;
+        sprite.spriteSheet.numRows = 1;
+        sprite.spriteSheet.numCols = 1;
+        sprite.rot = rot;
+
+        SubmitSprite(sprite);
+    }
+
+    public void SubmitSprite(Vec2& pos, real32 rot, Vec2& size, Vec4& color)
+    {
+        SubmitSprite(pos, rot, size, color, 0);
+    }
+
+    public void EndFrame()
+    {
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, m_VBO);
+
+        uint8* data = (uint8*)GL.glMapBuffer(GL.GL_ARRAY_BUFFER, GL.GL_READ_WRITE);
+        Mem.Copy(data, m_ColoredSprites.GetData(), sizeof(SubmitedSprite) * m_ColoredSprites.Size()); 
+
+        uint32 currentVertexOffset = m_ColoredSprites.Size() * 4;
+        for(uint32 i = 0; i < m_NumSpriteGroups; i++)
+        {
+            SpriteGroup* group = &m_SpriteGroups[i];
+            group.vertexOffset = currentVertexOffset;
+            group.indexCount = group.sprites.Size() * 6;
+
+            Mem.Copy(data + currentVertexOffset, group.sprites.GetData(), sizeof(SubmitedSprite) * group.sprites.Size());
+            currentVertexOffset += group.sprites.Size() * 4;
+        }
+
+        GL.glUnmapBuffer(GL.GL_ARRAY_BUFFER);
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0);
+    }
+
+    private void InitBuffers(uint32 maxSprites)
+    {
+        uint32* indices = new uint32[maxSprites * 6];
+
+        uint32 offset = 0;
+        uint32 numIndices = maxSprites * 6;
+		for (uint32 i = 0; i < numIndices; i += 6)
+		{
+			indices[i + 0] = offset + 0;
+			indices[i + 1] = offset + 1;
+			indices[i + 2] = offset + 2;
+
+			indices[i + 3] = offset + 0;
+			indices[i + 4] = offset + 2;
+			indices[i + 5] = offset + 3;
+
+			offset += 4;
+		}
+
+        m_VBO = GL.glGenBuffers();
+        m_IBO = GL.glGenBuffers();
+
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, m_VBO);
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, m_IBO);
+
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, sizeof(SubmitedSprite) * maxSprites, null, GL.GL_DYNAMIC_DRAW);
+        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, sizeof(uint32) * numIndices, indices, GL.GL_STATIC_DRAW);
+
+        delete[] indices;
     }
 
     private uint32 m_VAO;
@@ -105,4 +276,6 @@ class BatchRenderer
     private SpriteGroup m_SpriteGroups[32];
     private uint32 m_NumSpriteGroups;
     List<SubmitedSprite> m_ColoredSprites;
+
+    Shader m_SpriteShader;
 }

@@ -1,0 +1,94 @@
+Import "DataStructures/List.tls"
+Import "DataStructures/String.tls"
+
+class UniformMapElement
+{
+    public String name;
+    public uint32 location;
+};
+
+class UniformMapTextureElement
+{
+    public uint32 location;
+    public uint32 textureUnit;
+};
+
+class UniformMapTexture
+{
+    public void AddElement(uint32 location, uint32 textureUnit)
+    {
+        UniformMapTextureElement element;
+        element.location = location;
+        element.textureUnit = textureUnit;
+
+        elements[numTextureElements++] = element;
+    }
+
+    UniformMapTextureElement elements[32];
+    public String name;
+    uint32 numTextureElements;
+};
+
+class UniformMap
+{
+    public void AddUniformLocation(String& name, uint32 location)
+    {
+        UniformMapElement element;
+        element.name = name;
+        element.location = location;
+        m_UniformLocations.Push(element);
+    }
+
+    public void AddUniformTexture(UniformMapTexture& texture)
+    {
+        m_TextureUniforms.Push(texture);
+    }
+
+    public UniformMapElement* GetUniform(String& name)
+    {
+        for(uint32 i = 0; i < m_UniformLocations.Size(); i++)
+        {
+            UniformMapElement* element = &m_UniformLocations[i];
+
+            if(element->name == name)
+            {
+                return element;
+            }
+        }
+
+        return null;
+    }
+
+    public int32 GetUniformLocation(String& name)
+    {
+        for(uint32 i = 0; i < m_UniformLocations.Size(); i++)
+        {
+            UniformMapElement& element = m_UniformLocations[i];
+
+            if(element.name == name)
+            {
+                return element.location;
+            }
+        }
+
+        return -1;
+    }
+
+    public UniformMapTexture* GetTexture(String& name)
+    {
+        for(uint32 i = 0; i < m_TextureUniforms.Size(); i++)
+        {
+            UniformMapTexture* element = &m_TextureUniforms[i];
+
+            if(element->name == name)
+            {
+                return element;
+            }
+        }
+
+        return null;
+    }
+
+    private List<UniformMapElement> m_UniformLocations;
+    private List<UniformMapTexture> m_TextureUniforms;
+};
