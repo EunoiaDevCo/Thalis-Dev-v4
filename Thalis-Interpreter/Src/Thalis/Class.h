@@ -33,7 +33,7 @@ class Class
 {
 public:
 	Class(const std::string& name, Class* baseClass = nullptr) :
-		m_Name(name), m_BaseName(name), m_BaseClass(baseClass), m_NextFunctionID(0),
+		m_Name(name), m_BaseName(name), m_BaseClass(baseClass), m_NextFunctionID(0), m_CodeSize(0),
 		m_Destructor(nullptr), m_AssignSTFunction(nullptr), m_CopyConstructor(nullptr), m_DefaultConstructor(nullptr) { }
 
 	std::string GetName() const;
@@ -87,6 +87,8 @@ public:
 	inline bool HasBaseClass() const { return m_BaseClass != nullptr; }
 	inline VTable* GetVTable() const { return m_VTable; }
 
+	inline uint64 GetCodeSize() const { return m_CodeSize; }
+
 	uint16 ExecuteInstantiationCommand(Program* program, TemplateInstantiationCommand* command, const TemplateInstantiation& instantiation);
 
 	void BuildVTable();
@@ -102,6 +104,7 @@ private:
 	uint16 m_ID;
 	TemplateDefinition m_TemplateDefinition;
 	bool m_IsTemplateInstance;
+	uint64 m_CodeSize;
 
 	Class* m_BaseClass;
 

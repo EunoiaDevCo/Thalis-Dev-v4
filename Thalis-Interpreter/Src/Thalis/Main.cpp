@@ -8,6 +8,9 @@ int main()
 	Program program;
 	Parser parser(&program);
 	parser.Parse("Main.tls");
+	program.BuildVTables();
+	program.Resolve();
+	program.EmitCode();
 
 	uint32 pc = program.GetCodeSize();
 	uint16 mainClassID = program.GetClassIDWithMainFunction();
@@ -29,6 +32,7 @@ int main()
 	std::cout << "Scope stack size: " << program.GetScopeStackSize() << std::endl;
 	std::cout << "Loop stack size: " << program.GetLoopStackSize() << std::endl;
 	std::cout << "Code size: " << program.GetCodeSize() << std::endl;
+	program.PrintClassCodeSizes();
 
 	while (true);
 }

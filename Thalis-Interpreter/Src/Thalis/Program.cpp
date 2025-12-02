@@ -8,6 +8,7 @@
 #include "Modules/GLModule.h"
 #include "Modules/FSModule.h"
 #include "Modules/MemModule.h"
+#include "Modules/TimeModule.h"
 #include "Memory/Memory.h"
 
 static Program* g_CompiledProgram;
@@ -27,6 +28,7 @@ Program::Program()
 
 void Program::ExecuteProgram(uint32 pc)
 {
+	TimeModule::SetBeginTime();
 	uint32 initStaticsPC = GetCodeSize();
 	InitStatics();
 	CleanUpForExecution();
@@ -587,6 +589,14 @@ void Program::EmitCode()
 {
 	for (uint32 i = 0; i < m_Classes.size(); i++)
 		m_Classes[i]->EmitCode(this);
+}
+
+void Program::PrintClassCodeSizes() const
+{
+	for (uint32 i = 0; i < m_Classes.size(); i++)
+	{
+		std::cout << m_Classes[i]->GetName() << " code size: " << m_Classes[i]->GetCodeSize() << std::endl;
+	}
 }
 
 Program* Program::GetCompiledProgram()
@@ -1774,6 +1784,7 @@ void Program::ExecuteModuleFunctionCall(uint16 moduleID, uint16 function, bool u
 	case GL_MODULE_ID: value = GLModule::CallFunction(this, function, m_ArgStorage); break;
 	case FS_MODULE_ID: value = FSModule::CallFunction(this, function, m_ArgStorage); break;
 	case MEM_MODULE_ID: value = MemModule::CallFunction(this, function, m_ArgStorage); break;
+	case TIME_MODULE_ID: value = TimeModule::CallFunction(this, function, m_ArgStorage); break;
 	}
 
 	if (value.type != INVALID_ID && usesReturnValue)
@@ -1790,6 +1801,7 @@ void Program::ExecuteModuleConstant(uint16 moduleID, uint16 constant)
 	case GL_MODULE_ID: m_Stack.push_back(GLModule::Constant(this, constant)); break;
 	case FS_MODULE_ID: m_Stack.push_back(FSModule::Constant(this, constant)); break;
 	case MEM_MODULE_ID: m_Stack.push_back(MemModule::Constant(this, constant)); break;
+	case TIME_MODULE_ID: m_Stack.push_back(TimeModule::Constant(this, constant)); break;
 	}
 }
 

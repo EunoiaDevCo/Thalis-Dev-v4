@@ -39,6 +39,8 @@ Value GLModule::CallFunction(Program* program, uint16 function, const std::vecto
             return Value::MakeBool(false, program->GetStackAllocator());
         }
 
+        wglSwapIntervalEXT(0);
+
         return Value::MakeBool(true, program->GetStackAllocator());
     }
                                    // ------------------------------
@@ -66,7 +68,7 @@ Value GLModule::CallFunction(Program* program, uint16 function, const std::vecto
     case GLModuleFunction::TGL_BUFFER_DATA: {
         GLenum target = (GLenum)args[0].GetInt32();
         GLsizeiptr size = (GLsizeiptr)args[1].GetInt64();
-        void* data = args[2].data;
+        void* data = args[2].data ? *(void**)args[2].data : nullptr;
         GLenum usage = (GLenum)args[3].GetInt32();
         glBufferData(target, size, data, usage);
         return Value::MakeNULL();
@@ -686,7 +688,7 @@ Value GLModule::CallFunction(Program* program, uint16 function, const std::vecto
         GLint loc = args[0].GetInt32();
         GLsizei count = (GLsizei)args[1].GetInt32();
         GLboolean transpose = (GLboolean)(args[2].GetBool() ? GL_TRUE : GL_FALSE);
-        real32* matrixValue = (real32*)args[3].data;
+        real32* matrixValue = *(real32**)args[3].data;
         glUniformMatrix4fv(loc, count, transpose, matrixValue);
 
         return Value::MakeNULL();

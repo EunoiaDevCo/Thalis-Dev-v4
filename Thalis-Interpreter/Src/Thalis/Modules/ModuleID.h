@@ -8,6 +8,7 @@
 #define GL_MODULE_ID		3
 #define FS_MODULE_ID		4
 #define MEM_MODULE_ID		5
+#define TIME_MODULE_ID		6
 
 class Module
 {

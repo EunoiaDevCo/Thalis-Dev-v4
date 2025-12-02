@@ -71,6 +71,11 @@ class BatchRenderer
 
         InitBuffers(maxSprites);
         
+        GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, false, sizeof(Vertex2D), offsetof(Vertex2D.pos));
+        GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, false, sizeof(Vertex2D), offsetof(Vertex2D.texCoord));
+        GL.glVertexAttribPointer(2, 4, GL.GL_FLOAT, false, sizeof(Vertex2D), offsetof(Vertex2D.color));
+        GL.glVertexAttribPointer(3, 1, GL.GL_FLOAT, false, sizeof(Vertex2D), offsetof(Vertex2D.textureIndex));
+
         GL.glBindVertexArray(0);
 
         SetCamera(Vec2(0.0, 0.0), 0.0);
@@ -238,6 +243,8 @@ class BatchRenderer
     {
         GL.glClear(GL.GL_COLOR_BUFFER_BIT);
         GL.glBindVertexArray(m_VAO);
+
+        m_ViewProjection = Mat4.CreateIdentity();
 
         m_SpriteShader.Bind();
         m_SpriteShader.SetUniform("ViewProjection", m_ViewProjection);

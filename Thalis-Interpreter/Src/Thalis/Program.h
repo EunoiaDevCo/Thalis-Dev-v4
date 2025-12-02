@@ -193,6 +193,8 @@ public:
 	inline Frame* GetFrame(uint32 frameIndex) { return m_FrameStack[frameIndex]; }
 
 	inline Value StackBack() const { return m_Stack.back(); }
+
+	void PrintClassCodeSizes() const;
 public:
 	static Program* GetCompiledProgram();
 private:

@@ -31,6 +31,7 @@
     <ClInclude Include="Src\Thalis\Modules\MathModule.h" />
     <ClInclude Include="Src\Thalis\Modules\MemModule.h" />
     <ClInclude Include="Src\Thalis\Modules\ModuleID.h" />
+    <ClInclude Include="Src\Thalis\Modules\TimeModule.h" />
     <ClInclude Include="Src\Thalis\Modules\WindowModule.h" />
     <ClInclude Include="Src\Thalis\Operator.h" />
     <ClInclude Include="Src\Thalis\Parser.h" />
@@ -58,6 +59,7 @@
     <ClCompile Include="Src\Thalis\Modules\MathModule.cpp" />
     <ClCompile Include="Src\Thalis\Modules\MemModule.cpp" />
     <ClCompile Include="Src\Thalis\Modules\ModuleID.cpp" />
+    <ClCompile Include="Src\Thalis\Modules\TimeModule.cpp" />
     <ClCompile Include="Src\Thalis\Modules\WindowModule.cpp" />
     <ClCompile Include="Src\Thalis\Parser.cpp" />
     <ClCompile Include="Src\Thalis\Platform\Windows\Win32Window.cpp" />

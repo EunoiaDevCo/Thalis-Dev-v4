@@ -255,6 +255,9 @@ void Class::EmitCode(Program* program)
 		{
 			program->AddReturnCommand(0);
 		}
+
+		uint64 functionCodeSize = program->GetCodeSize() - function->pc;
+		m_CodeSize += functionCodeSize;
 	}
 }
 

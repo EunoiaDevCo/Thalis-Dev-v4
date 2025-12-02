@@ -14,6 +14,7 @@ Value MemModule::CallFunction(Program* program, uint16 function, const std::vect
 		Value dst = args[0];
 		Value src = args[1];
 		uint64 size = args[2].GetUInt64();
+
 		memcpy(*(void**)dst.data, *(void**)src.data, size);
 		return Value::MakeNULL();
 	} break;

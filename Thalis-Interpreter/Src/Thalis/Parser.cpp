@@ -11,6 +11,7 @@
 #include "Modules/GLModule.h"
 #include "Modules/FSModule.h"
 #include "Modules/MemModule.h"
+#include "Modules/TimeModule.h"
 #include <unordered_set>
 #include <filesystem>
 
@@ -57,10 +58,6 @@ void Parser::Parse(const std::string& path)
 		token = tokenizer.GetToken();
 	}
 
-	m_Program->BuildVTables();
-	m_Program->Resolve();
-	m_Program->EmitCode();
-
 	free(contents);
 }
 
@@ -83,6 +80,7 @@ bool Parser::ParseImport(Tokenizer* tokenizer)
 		else if (builtInModule == "GL") { m_Program->AddModule("GL", GL_MODULE_ID); GLModule::Init(); }
 		else if (builtInModule == "FS") { m_Program->AddModule("FS", FS_MODULE_ID); FSModule::Init(); }
 		else if (builtInModule == "Mem") { m_Program->AddModule("Mem", MEM_MODULE_ID); MemModule::Init(); }
+		else if (builtInModule == "Time") { m_Program->AddModule("Time", TIME_MODULE_ID); TimeModule::Init(); }
 
 		tokenizer->Expect(TokenTypeT::SEMICOLON);
 	}
@@ -2845,6 +2843,12 @@ ASTExpressionModuleFunctionCall* Parser::MakeModuleFunctionCall(uint16 moduleID,
 		else if (functionName == "Free") function = (uint32)MemModuleFunction::FREE;
 		else if (functionName == "Set") function = (uint32)MemModuleFunction::SET;
 	}
+	else if (moduleName == "Time")
+	{
+		if (functionName == "GetMilli") function = (uint32)TimeModuleFunction::GET_MILLI;
+		else if (functionName == "GetMicro") function = (uint32)TimeModuleFunction::GET_MICRO;
+		else if (functionName == "GetNano") function = (uint32)TimeModuleFunction::GET_NANO;
+	}
 
 	return new ASTExpressionModuleFunctionCall(moduleID, function, args);
 }
@@ -3183,6 +3187,10 @@ ASTExpressionModuleConstant* Parser::MakeModuleConstant(uint16 moduleID, const s
 
 	}
 	else if (moduleName == "Mem")
+	{
+
+	}
+	else if (moduleName == "Time")
 	{
 
 	}

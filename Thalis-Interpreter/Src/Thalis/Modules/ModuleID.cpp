@@ -5,6 +5,7 @@
 #include "GLModule.h"
 #include "FSModule.h"
 #include "MemModule.h"
+#include "TimeModule.h"
 
 TypeInfo Module::GetFunctionReturnInfo(uint16 moduleID, uint16 function)
 {
@@ -16,6 +17,7 @@ TypeInfo Module::GetFunctionReturnInfo(uint16 moduleID, uint16 function)
     case GL_MODULE_ID: return GLModule::GetFunctionReturnInfo(function);
     case FS_MODULE_ID: return FSModule::GetFunctionReturnInfo(function);
     case MEM_MODULE_ID: return MemModule::GetFunctionReturnInfo(function);
+    case TIME_MODULE_ID: return TimeModule::GetFunctionReturnInfo(function);
     }
 }
 
@@ -29,5 +31,6 @@ TypeInfo Module::GetConstantTypeInfo(uint16 moduleID, uint16 constant)
     case GL_MODULE_ID: return GLModule::GetConstantTypeInfo(constant);
     case FS_MODULE_ID: return FSModule::GetConstantTypeInfo(constant);
     case MEM_MODULE_ID: return MemModule::GetConstantTypeInfo(constant);
+    case TIME_MODULE_ID: return TimeModule::GetConstantTypeInfo(constant);
     }
 }

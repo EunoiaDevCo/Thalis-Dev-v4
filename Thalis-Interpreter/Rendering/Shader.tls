@@ -54,7 +54,7 @@ class Shader
     public void SetUniform(String& name, Vec2& vec) { GL.glUniform2f(m_UniformMap.GetUniformLocation(name), vec.x, vec.y); }
     public void SetUniform(String& name, Vec3& vec) { GL.glUniform3f(m_UniformMap.GetUniformLocation(name), vec.x, vec.y, vec.z); }
     public void SetUniform(String& name, Vec4& vec) { GL.glUniform4f(m_UniformMap.GetUniformLocation(name), vec.x, vec.y, vec.z, vec.w); }
-    public void SetUniform(String& name, Mat4& mat) { GL.glUniformMatrix4fv(m_UniformMap.GetUniformLocation(name), 1, false, mat.values); }
+    public void SetUniform(String& name, Mat4& mat) { GL.glUniformMatrix4fv(m_UniformMap.GetUniformLocation(name), 1, false, &mat.values[0]); }
 
     public void BindTexture(String& name, uint32 handle)
     {
@@ -91,6 +91,7 @@ class Shader
             int32 uniformTypeIndex = code.FindFirstNotOf(" ", firstSpaceIndex);
             int32 secondSpaceIndex = code.FindFirstOf(" ", uniformTypeIndex);
             int32 semicolonIndex = code.FindFirstOf(";", secondSpaceIndex);//"
+
 
             String uniformTypeName = code.SubString(uniformTypeIndex, secondSpaceIndex - 1).Trim();
             String uniformName = code.SubString(secondSpaceIndex + 1, semicolonIndex - 1).Trim();
